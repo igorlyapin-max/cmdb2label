@@ -68,20 +68,38 @@ curl -fsS http://127.0.0.1:8094/metrics
   "aliases": {
     "inv": ["InventoryId", "AssetInventoryNumber", "Code"],
     "model": ["ModelName", "Модель"],
-    "cls": ["ModelGroup", "Группа модели"],
+    "type": ["Тип", "ModelGroup", "Группа модели"],
     "sn": ["SerialNumber", "FactorySN", "serialnum"]
   },
   "derivedFields": {
-    "groupFromLookupParent": {
+    "typeFromModelLookupParent": {
       "enabled": true,
-      "sourceField": "model",
-      "targetField": "cls"
+      "modelField": "model",
+      "typeField": "type",
+      "sourceLookupType": "Model",
+      "parentLookupType": "ModelGroup"
     }
   }
 }
 ```
 
-По умолчанию `cls` на этикетке означает `Группа модели`: backend берет CMDBuild-атрибут, mapped как `model`, читает его lookup value и выводит parent lookup. Если в конкретной модели CMDBuild это поле заполняется вручную из CSV, можно оставить alias для `cls`; если нужно вернуть старое поведение без derive, задайте `"enabled": false`.
+По умолчанию `type` на этикетке означает `Тип`: backend берет CMDBuild-атрибут, mapped как `model`, читает его lookup value и выводит parent lookup. Если в конкретной модели CMDBuild это поле заполняется вручную из CSV, можно оставить alias для `type`; если нужно отключить derive, задайте `"enabled": false`.
+
+Где править:
+
+- Файл конфигурации: `/etc/cmdb2label/aliases.json`.
+- Подключение файла: `CMDB_LABELS_ALIAS_CONFIG_FILE=/etc/cmdb2label/aliases.json`.
+- Альтернатива без файла: передать тот же JSON в env `CMDB_LABELS_ALIAS_CONFIG`.
+
+Lookup-настройки:
+
+- `sourceLookupType` - lookup type, где лежат модели. Заполняйте, если CMDBuild metadata атрибута модели не отдает `lookupType`.
+- `parentLookupType` - parent lookup type, где лежат типы. Заполняйте, если lookup value модели не отдает `parent_type`.
+- `typeField` оставляйте `"type"` или не задавайте: UI и payload этикетки используют только поле `Тип`.
+
+Старые ключи `aliases.cls`, `derivedFields.groupFromLookupParent`, `sourceField` и `targetField` временно принимаются для миграции, но backend пишет startup warning. Новый конфиг должен использовать `aliases.type`, `derivedFields.typeFromModelLookupParent`, `modelField` и `typeField`.
+
+Если JSON в `CMDB_LABELS_ALIAS_CONFIG` или файл из `CMDB_LABELS_ALIAS_CONFIG_FILE` не читается или не проходит schema validation, backend не стартует, а `/health/ready` возвращает `503` без раскрытия внутреннего `CMDBUILD_ORIGIN`.
 
 Запуск:
 
@@ -151,7 +169,8 @@ curl -i http://<host>/cmdbuild/custom-api/labels/session
 
 - права текущего пользователя на классы и атрибуты оборудования;
 - что в модели есть атрибуты, совпадающие с aliases для `inv` или `sn`;
-- что атрибут модели совпадает с aliases для `model` и является lookup с parent lookup, если нужно автоматически заполнить `Группа модели`;
+- что атрибут модели совпадает с aliases для `model` и является lookup с parent lookup, если нужно автоматически заполнить `Тип`;
+- `sourceLookupType` и `parentLookupType` в `/etc/cmdb2label/aliases.json`, если CMDBuild не отдает lookup metadata или parent lookup type;
 - `CMDB_LABELS_ALIAS_CONFIG_FILE`, если коды атрибутов нестандартные;
 - лимиты `CMDB_LABELS_MAX_CLASSES`, `CMDB_LABELS_MAX_SEARCH_CLASSES`, `CMDB_LABELS_MAX_REST_CALLS`.
 

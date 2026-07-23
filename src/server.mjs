@@ -24,7 +24,8 @@ import {
   mergeLabelConfig,
   mergeResolvedDevice,
   normalizeDraftDevice,
-  uniqueStrings
+  uniqueStrings,
+  validateLabelConfig
 } from './labels-core.mjs';
 
 const syslogFacilityCodes = {
@@ -83,6 +84,7 @@ const SYSLOG_PORT = Number(process.env.CMDB_LABELS_SYSLOG_PORT || 514);
 const SYSLOG_PROTOCOL = normalizeSyslogProtocol(process.env.CMDB_LABELS_SYSLOG_PROTOCOL || 'udp');
 const SYSLOG_FACILITY = normalizeSyslogFacility(process.env.CMDB_LABELS_SYSLOG_FACILITY || 'local0');
 const LOG_REDACT_HEADERS = new Set(['cookie', 'authorization', 'cmdbuild-authorization', 'x-cmdb2label-csrf', 'set-cookie']);
+const PLACEHOLDER_CSRF_SECRETS = new Set(['change-me-to-a-stable-secret-from-secret-store']);
 const CMDBUILD_PROXY_ALLOWLIST_STRICT = process.env.CMDB_LABELS_CMDBUILD_PROXY_ALLOWLIST_STRICT !== 'false';
 const CMDBUILD_PROXY_ENABLED = process.env.CMDB_LABELS_ENABLE_CMDBUILD_PROXY === 'true';
 const PROXY_COOKIE_SAMESITE = process.env.CMDB_LABELS_PROXY_COOKIE_SAMESITE || '';
@@ -209,9 +211,11 @@ function loggingStatus() {
 }
 
 function validateRuntimeConfig(input = {}) {
-  const nodeEnv = String(input.nodeEnv === undefined ? process.env.NODE_ENV || '' : input.nodeEnv || '').trim();
-  const csrfSecret = String(input.csrfSecret === undefined ? process.env.CMDB_LABELS_CSRF_SECRET || '' : input.csrfSecret || '').trim();
+  const env = input.env || process.env;
+  const nodeEnv = String(input.nodeEnv === undefined ? env.NODE_ENV || '' : input.nodeEnv || '').trim();
+  const csrfSecret = String(input.csrfSecret === undefined ? env.CMDB_LABELS_CSRF_SECRET || '' : input.csrfSecret || '').trim();
   const logTargets = input.logTargets || LOG_TARGETS;
+  const aliasConfigValidation = input.aliasConfigValidation || readAliasConfigFromEnv(env);
   const errors = [];
   const warnings = [];
 
@@ -220,6 +224,13 @@ function validateRuntimeConfig(input = {}) {
       code: 'csrf_secret_required',
       env: 'CMDB_LABELS_CSRF_SECRET',
       message: 'Production startup requires a stable external CSRF secret.'
+    });
+  }
+  if (nodeEnv.toLowerCase() === 'production' && PLACEHOLDER_CSRF_SECRETS.has(csrfSecret)) {
+    errors.push({
+      code: 'csrf_secret_placeholder',
+      env: 'CMDB_LABELS_CSRF_SECRET',
+      message: 'Production startup rejects the example CSRF secret placeholder.'
     });
   }
   if (!Array.isArray(logTargets) || !logTargets.includes('stdout')) {
@@ -243,8 +254,21 @@ function validateRuntimeConfig(input = {}) {
       message: 'Verbose diagnostics should be enabled only temporarily.'
     });
   }
+  errors.push(...aliasConfigValidation.errors);
+  warnings.push(...aliasConfigValidation.warnings);
 
-  return { ok: errors.length === 0, nodeEnv, diagnosticMode: DIAGNOSTIC_MODE, logTargets, errors, warnings };
+  return {
+    ok: errors.length === 0,
+    nodeEnv,
+    diagnosticMode: DIAGNOSTIC_MODE,
+    logTargets,
+    aliasConfig: {
+      source: aliasConfigValidation.source,
+      configured: aliasConfigValidation.configured
+    },
+    errors,
+    warnings
+  };
 }
 
 function runtimeConfigSummary(validation = validateRuntimeConfig()) {
@@ -252,6 +276,7 @@ function runtimeConfigSummary(validation = validateRuntimeConfig()) {
     nodeEnv: validation.nodeEnv || 'development',
     diagnosticMode: validation.diagnosticMode,
     logTargets: validation.logTargets,
+    aliasConfig: validation.aliasConfig,
     errors: validation.errors.map((item) => item.code),
     warnings: validation.warnings.map((item) => item.code)
   };
@@ -404,6 +429,12 @@ function agentForTarget(target) {
 
 function pathMatchesPrefix(pathname, prefix) {
   return pathname === prefix || pathname.startsWith(`${prefix}/`);
+}
+
+function isSafeRelativeRequestTarget(requestTarget) {
+  const text = String(requestTarget || '/');
+  if (text.startsWith('//')) return false;
+  return !/^[a-z][a-z0-9+.-]*:/i.test(text);
 }
 
 function isCmdbuildProxyPathAllowed(pathname, strict = CMDBUILD_PROXY_ALLOWLIST_STRICT, method = 'GET') {
@@ -605,7 +636,8 @@ function cmdbuildRequest(pathname, authToken = '', options = {}) {
 
 async function countedCmdbuildRequest(pathname, authToken, context, options = {}) {
   if (context) assertRestBudget(context);
-  const response = await cmdbuildRequest(pathname, authToken, options);
+  const requestFn = context && context.cmdbuildRequest ? context.cmdbuildRequest : cmdbuildRequest;
+  const response = await requestFn(pathname, authToken, options);
   if (context) context.restCalls += 1;
   return response;
 }
@@ -633,29 +665,27 @@ function sanitizeSession(data) {
 
 async function readinessPayload() {
   const payload = baseHealthPayload();
+  const aliasConfigValidation = readAliasConfigFromEnv();
+  if (!aliasConfigValidation.ok) {
+    return {
+      ...payload,
+      ready: false,
+      status: 'not_ready'
+    };
+  }
   try {
     const response = await cmdbuildRequest('/cmdbuild/services/rest/v3/sessions/current', '', { timeoutMs: HEALTH_TIMEOUT_MS });
     const upstreamReachable = response.statusCode > 0 && response.statusCode < 500;
     return {
       ...payload,
       ready: upstreamReachable,
-      status: upstreamReachable ? 'ready' : 'not_ready',
-      cmdbuild: {
-        ok: upstreamReachable,
-        statusCode: response.statusCode,
-        origin: CMDBUILD_ORIGIN
-      }
+      status: upstreamReachable ? 'ready' : 'not_ready'
     };
   } catch (error) {
     return {
       ...payload,
       ready: false,
-      status: 'not_ready',
-      cmdbuild: {
-        ok: false,
-        origin: CMDBUILD_ORIGIN,
-        error: error.message || String(error)
-      }
+      status: 'not_ready'
     };
   }
 }
@@ -669,15 +699,77 @@ function baseHealthPayload() {
   };
 }
 
-function loadAliasConfig() {
-  const text = process.env.CMDB_LABELS_ALIAS_CONFIG ||
-    (process.env.CMDB_LABELS_ALIAS_CONFIG_FILE ? fs.readFileSync(process.env.CMDB_LABELS_ALIAS_CONFIG_FILE, 'utf8') : '');
-  if (!text.trim()) return {};
-  try {
-    return JSON.parse(text);
-  } catch (error) {
-    throw new Error(`Invalid CMDB labels alias config JSON: ${error.message}`);
+function readAliasConfigFromEnv(env = process.env) {
+  const inline = String(env.CMDB_LABELS_ALIAS_CONFIG || '');
+  const filePath = String(env.CMDB_LABELS_ALIAS_CONFIG_FILE || '').trim();
+  const source = inline.trim() ? 'CMDB_LABELS_ALIAS_CONFIG' : filePath ? 'CMDB_LABELS_ALIAS_CONFIG_FILE' : 'default';
+  const configured = source !== 'default';
+  let text = inline;
+
+  if (!text.trim() && filePath) {
+    try {
+      text = fs.readFileSync(filePath, 'utf8');
+    } catch (error) {
+      return {
+        ok: false,
+        source,
+        configured,
+        config: {},
+        errors: [{
+          code: 'alias_config_file_unreadable',
+          env: 'CMDB_LABELS_ALIAS_CONFIG_FILE',
+          path: filePath,
+          message: `Cannot read CMDB labels alias config file: ${error.message}`
+        }],
+        warnings: []
+      };
+    }
   }
+
+  if (!text.trim()) {
+    return { ok: true, source, configured, config: {}, errors: [], warnings: [] };
+  }
+  let config;
+  try {
+    config = JSON.parse(text);
+  } catch (error) {
+    return {
+      ok: false,
+      source,
+      configured,
+      config: {},
+      errors: [{
+        code: 'alias_config_json_invalid',
+        env: source,
+        message: `Invalid CMDB labels alias config JSON: ${error.message}`
+      }],
+      warnings: []
+    };
+  }
+
+  const validation = validateLabelConfig(config);
+  return {
+    ok: validation.ok,
+    source,
+    configured,
+    config,
+    errors: validation.errors.map((item) => ({ ...item, env: source })),
+    warnings: validation.warnings.map((item) => ({ ...item, env: source }))
+  };
+}
+
+function formatAliasConfigErrors(errors = []) {
+  return errors.map((item) => `${item.path || item.env || item.code}: ${item.message}`).join('; ');
+}
+
+function loadAliasConfig() {
+  const validation = readAliasConfigFromEnv();
+  if (!validation.ok) {
+    const error = new Error(formatAliasConfigErrors(validation.errors) || 'Invalid CMDB labels alias config.');
+    error.statusCode = 500;
+    throw error;
+  }
+  return validation.config;
 }
 
 function authCacheKey(authToken, labelConfig = {}) {
@@ -755,9 +847,9 @@ async function loadClassCatalog(authToken, labelConfig, context) {
   return catalog;
 }
 
-async function resolveDrafts(drafts, authToken, labelConfig) {
+async function resolveDrafts(drafts, authToken, labelConfig, options = {}) {
   const aliases = labelConfig.aliases || {};
-  const context = { restCalls: 0, lookupTypeCache: new Map() };
+  const context = { restCalls: 0, lookupTypeCache: new Map(), cmdbuildRequest: options.cmdbuildRequest };
   const normalized = Array.isArray(drafts)
     ? drafts.map((draft, index) => normalizeDraftDevice({ row: index + 1, ...draft }, aliases))
     : [];
@@ -844,12 +936,12 @@ async function searchCmdbMatches(draft, authToken, labelConfig, context) {
       const cards = await searchClassCards(classInfo, attribute, key.value, authToken, context);
       for (const card of cards) {
         const device = cmdbCardToDevice(card, classInfo, classInfo.fieldMap, {
-          classFallbackForCls: !isLookupParentDerivationEnabled(labelConfig)
+          classFallbackForType: !isTypeLookupParentDerivationEnabled(labelConfig)
         });
         await applyDerivedFields(device, card, classInfo, labelConfig, authToken, context);
         const merged = mergeResolvedDevice(draft, device);
         const cardId = cleanValue(card._id || card.Id || card.id);
-        const uniqueKey = cardId || `${merged.inv}|${merged.sn}|${merged.model}|${merged.cls}`;
+        const uniqueKey = cardId || `${merged.inv}|${merged.sn}|${merged.model}|${merged.type}`;
         if (seen.has(uniqueKey)) continue;
         seen.add(uniqueKey);
         matches.push({ className: classInfo.name, cardId, device: merged });
@@ -889,29 +981,24 @@ async function searchClassCards(classInfo, attribute, value, authToken, context)
 }
 
 async function applyDerivedFields(device, card, classInfo, labelConfig, authToken, context) {
-  const rule = labelConfig.derivedFields && labelConfig.derivedFields.groupFromLookupParent;
+  const rule = labelConfig.derivedFields && labelConfig.derivedFields.typeFromModelLookupParent;
   if (!rule || !rule.enabled) return device;
 
-  const sourceField = cleanValue(rule.sourceField || 'model');
-  const targetField = cleanValue(rule.targetField || 'cls');
-  if (!sourceField || !targetField || cleanValue(device && device[targetField])) return device;
+  const modelField = cleanValue(rule.modelField || 'model');
+  const typeField = cleanValue(rule.typeField || 'type');
+  if (!modelField || !typeField || cleanValue(device && device[typeField])) return device;
 
-  const sourceAttr = fieldMapAttributeName(classInfo.fieldMap, sourceField);
-  const sourceMeta = classInfo.fieldMeta && classInfo.fieldMeta[sourceField];
-  const lookupType = cleanValue(sourceMeta && sourceMeta.lookupType);
-  if (!sourceAttr || !lookupType) return device;
+  const modelAttr = fieldMapAttributeName(classInfo.fieldMap, modelField);
+  const modelMeta = classInfo.fieldMeta && classInfo.fieldMeta[modelField];
+  const sourceLookupType = cleanValue(rule.sourceLookupType || (modelMeta && modelMeta.lookupType));
+  if (!modelAttr || !sourceLookupType) return device;
 
-  const ids = lookupIdsFromCard(card, sourceAttr);
-  for (const id of ids) {
-    const value = await getLookupValueById(authToken, lookupType, id, context);
-    const parentType = cleanValue(value && (value.parent_type || value.parentType));
-    const parentId = cleanValue(value && (value.parent_id || value.parentId));
-    if (!parentType || !parentId) continue;
-
-    const parent = await getLookupValueById(authToken, parentType, parentId, context);
+  const values = await lookupValuesFromCardField(authToken, sourceLookupType, card, modelAttr, context);
+  for (const value of values) {
+    const parent = await getLookupParentValue(authToken, value, rule, context);
     const text = displayCmdbValue(parent);
     if (text) {
-      device[targetField] = text;
+      device[typeField] = text;
       return device;
     }
   }
@@ -919,16 +1006,58 @@ async function applyDerivedFields(device, card, classInfo, labelConfig, authToke
   return device;
 }
 
-function isLookupParentDerivationEnabled(labelConfig) {
-  const rule = labelConfig.derivedFields && labelConfig.derivedFields.groupFromLookupParent;
-  return Boolean(rule && rule.enabled && cleanValue(rule.targetField || 'cls') === 'cls');
+function isTypeLookupParentDerivationEnabled(labelConfig) {
+  const rule = labelConfig.derivedFields && labelConfig.derivedFields.typeFromModelLookupParent;
+  return Boolean(rule && rule.enabled && cleanValue(rule.typeField || 'type') === 'type');
+}
+
+async function lookupValuesFromCardField(authToken, lookupType, card, attrName, context) {
+  const values = [];
+  const seen = new Set();
+
+  for (const id of lookupIdsFromCard(card, attrName)) {
+    const value = await getLookupValueById(authToken, lookupType, id, context);
+    const key = lookupValueKey(value);
+    if (value && !seen.has(key)) {
+      values.push(value);
+      seen.add(key);
+    }
+  }
+
+  for (const text of lookupTextsFromCard(card, attrName)) {
+    const value = await getLookupValueByText(authToken, lookupType, text, context);
+    const key = lookupValueKey(value);
+    if (value && !seen.has(key)) {
+      values.push(value);
+      seen.add(key);
+    }
+  }
+
+  return values;
 }
 
 function lookupIdsFromCard(card = {}, attrName) {
-  const value = card[attrName];
-  const values = Array.isArray(value) ? value : [value];
+  const names = uniqueStrings([
+    attrName,
+    `_${attrName}_id`,
+    `${attrName}_id`,
+    `${attrName}Id`,
+    `${attrName}_Id`
+  ]);
+  const values = [];
+  for (const name of names) values.push(card[name]);
+  return lookupIdsFromValues(values);
+}
+
+function lookupIdsFromValues(values) {
+  const rawValues = Array.isArray(values) ? values : [values];
+  const flattened = [];
+  for (const value of rawValues) {
+    if (Array.isArray(value)) flattened.push(...value);
+    else flattened.push(value);
+  }
   const ids = [];
-  for (const item of values) {
+  for (const item of flattened) {
     if (item === undefined || item === null) continue;
     if (typeof item === 'object') {
       const id = cleanValue(item._id || item.id || item.Id);
@@ -941,11 +1070,83 @@ function lookupIdsFromCard(card = {}, attrName) {
   return uniqueStrings(ids);
 }
 
+function lookupTextsFromCard(card = {}, attrName) {
+  return uniqueStrings([
+    card[`_${attrName}_description`],
+    card[`_${attrName}_description_translation`],
+    card[`_${attrName}_code`],
+    card[attrName]
+  ].map(displayCmdbValue));
+}
+
+function lookupValueKey(value) {
+  return cleanValue(value && (value._id || value.id || value.Id)) || displayCmdbValue(value);
+}
+
 async function getLookupValueById(authToken, lookupType, id, context) {
   const type = cleanValue(lookupType);
   const lookupId = cleanValue(id);
   if (!type || !lookupId) return null;
 
+  const values = await getLookupValuesByType(authToken, type, context);
+  return values.find((item) => cleanValue(item && (item._id || item.id || item.Id)) === lookupId) || null;
+}
+
+async function getLookupValueByText(authToken, lookupType, text, context) {
+  const type = cleanValue(lookupType);
+  const lookupText = cleanValue(text);
+  if (!type || !lookupText) return null;
+
+  const values = await getLookupValuesByType(authToken, type, context);
+  return values.find((item) => {
+    const candidates = [
+      displayCmdbValue(item),
+      item && item.description,
+      item && item._description,
+      item && item.Description,
+      item && item.code,
+      item && item.Code,
+      item && item.name
+    ].map(displayCmdbValue);
+    return candidates.some((candidate) => candidate === lookupText);
+  }) || null;
+}
+
+async function getLookupParentValue(authToken, value, rule, context) {
+  const directParentText = displayLookupParentInline(value);
+  if (directParentText) return { description: directParentText };
+
+  const parent = value && (value.parent || value._parent);
+  const parentType = cleanValue(value && (
+    value.parent_type ||
+    value.parentType ||
+    value._parent_type ||
+    value._parentType ||
+    rule.parentLookupType
+  ));
+  const parentId = cleanValue(value && (
+    value.parent_id ||
+    value.parentId ||
+    value._parent_id ||
+    value._parentId ||
+    (parent && typeof parent !== 'object' ? parent : '')
+  ));
+  if (!parentType || !parentId) return null;
+  return getLookupValueById(authToken, parentType, parentId, context);
+}
+
+function displayLookupParentInline(value) {
+  if (!value || typeof value !== 'object') return '';
+  const parent = value.parent || value._parent;
+  if (parent && typeof parent === 'object') {
+    return cleanValue(parent.description || parent._description || parent.Description || parent.code || parent.Code || parent.name);
+  }
+  return cleanValue(value.parent_description || value._parent_description || value.parentDescription);
+}
+
+async function getLookupValuesByType(authToken, lookupType, context) {
+  const type = cleanValue(lookupType);
+  if (!type) return [];
   if (!context.lookupTypeCache) context.lookupTypeCache = new Map();
   if (!context.lookupTypeCache.has(type)) {
     const query = new URLSearchParams();
@@ -963,7 +1164,7 @@ async function getLookupValueById(authToken, lookupType, id, context) {
   }
 
   const values = context.lookupTypeCache.get(type) || [];
-  return values.find((item) => cleanValue(item && (item._id || item.id || item.Id)) === lookupId) || null;
+  return values;
 }
 
 function assertRestBudget(context) {
@@ -1116,6 +1317,15 @@ function serveUi(res) {
 }
 
 function proxyToCmdbuild(req, res, requestUrl) {
+  if (!isSafeRelativeRequestTarget(req.url || '/')) {
+    writeLog('warn', 'cmdbuild.proxy_target_rejected', {
+      method: req.method,
+      path: requestUrl.pathname
+    });
+    sendJson(res, 400, { ok: false, message: 'CMDBuild proxy request target is not allowed.' });
+    return;
+  }
+
   if (!isCmdbuildProxyPathAllowed(requestUrl.pathname, CMDBUILD_PROXY_ALLOWLIST_STRICT, req.method)) {
     writeLog('warn', 'cmdbuild.proxy_path_rejected', {
       method: req.method,
@@ -1125,7 +1335,7 @@ function proxyToCmdbuild(req, res, requestUrl) {
     return;
   }
 
-  const target = new URL(req.url || '/', CMDBUILD_ORIGIN);
+  const target = new URL(`${requestUrl.pathname}${requestUrl.search}`, CMDBUILD_ORIGIN);
   const externalHost = String(req.headers['x-forwarded-host'] || req.headers.host || `${LISTEN_HOST}:${LISTEN_PORT}`).split(',')[0].trim();
   const externalProto = String(req.headers['x-forwarded-proto'] || 'http').split(',')[0].trim() || 'http';
   const headers = { ...req.headers };
@@ -1305,6 +1515,13 @@ if (isMain) {
     writeLog('error', 'app.config_invalid', runtimeConfigSummary(validation), { force: true });
     process.exit(1);
   }
+  for (const warning of validation.warnings) {
+    writeLog('warn', 'app.config_warning', {
+      code: warning.code,
+      env: warning.env,
+      path: warning.path
+    }, { force: true });
+  }
   const server = createServer();
   installGracefulShutdown(server);
   server.listen(LISTEN_PORT, LISTEN_HOST, () => {
@@ -1326,10 +1543,12 @@ export {
   isCmdbuildProxyPathAllowed,
   isCmdbuildUiCacheSensitive,
   isJsonContentType,
+  isSafeRelativeRequestTarget,
   isSameOriginRequest,
   loggingStatus,
   normalizeDiagnosticMode,
   normalizeLogTargets,
+  readAliasConfigFromEnv,
   resolveDrafts,
   rewriteCmdbuildManifest,
   rewriteCmdbuildUiHtml,

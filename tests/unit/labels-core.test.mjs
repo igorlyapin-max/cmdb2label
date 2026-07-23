@@ -8,9 +8,11 @@ import {
   cmdbCardToDevice,
   deviceRequiredErrors,
   mergeAliasConfig,
+  mergeDerivedFieldConfig,
   mergeResolvedDevice,
   normalizeDraftDevice,
-  parseManualAttributes
+  parseManualAttributes,
+  validateLabelConfig
 } from '../../src/labels-core.mjs';
 
 test('parseManualAttributes reads two-line attribute pairs', () => {
@@ -31,15 +33,36 @@ test('normalizeDraftDevice maps Russian and English aliases', () => {
     rawFields: [
       { name: 'Инв. номер', value: ' INV-1 ' },
       { name: 'Тип/Модель', value: ' HP LaserJet ' },
-      { name: 'Группа модели', value: ' HP ' },
+      { name: 'Тип', value: ' HP ' },
       { name: 'serialNumber', value: ' SN123 ' }
     ]
   });
 
   assert.equal(device.inv, 'INV-1');
   assert.equal(device.model, 'HP LaserJet');
-  assert.equal(device.cls, 'HP');
+  assert.equal(device.type, 'HP');
   assert.equal(device.sn, 'SN123');
+});
+
+test('normalizeDraftDevice keeps legacy group alias as type input', () => {
+  const device = normalizeDraftDevice({
+    rawFields: [
+      { name: 'Группа модели', value: ' HP ' }
+    ]
+  });
+
+  assert.equal(device.type, 'HP');
+});
+
+test('normalizeDraftDevice maps direct legacy cls draft field to type', () => {
+  const device = normalizeDraftDevice({
+    inv: 'INV-1',
+    model: 'HP 1111',
+    cls: 'Printer',
+    sn: 'SN123'
+  });
+
+  assert.equal(device.type, 'Printer');
 });
 
 test('normalizeDraftDevice maps CMDB CSV headers and does not treat Description as model', () => {
@@ -54,7 +77,7 @@ test('normalizeDraftDevice maps CMDB CSV headers and does not treat Description 
 
   assert.equal(device.inv, 'C2M-CITY-20260523-ARM-001-01');
   assert.equal(device.model, 'HP 1111');
-  assert.equal(device.cls, '');
+  assert.equal(device.type, '');
   assert.equal(device.sn, 'C2M-CITY-20260523-ARM-SN-001-01');
 });
 
@@ -74,6 +97,50 @@ test('mergeAliasConfig keeps defaults and adds configured aliases', () => {
   const aliases = mergeAliasConfig({ aliases: { sn: ['FactorySN'] } });
   assert.ok(aliases.sn.includes('SN'));
   assert.ok(aliases.sn.includes('FactorySN'));
+});
+
+test('mergeAliasConfig maps legacy cls aliases into type', () => {
+  const aliases = mergeAliasConfig({ aliases: { cls: ['LegacyType'] } });
+
+  assert.ok(aliases.type.includes('LegacyType'));
+});
+
+test('mergeDerivedFieldConfig maps legacy groupFromLookupParent rule to type rule', () => {
+  const derived = mergeDerivedFieldConfig({
+    derivedFields: {
+      groupFromLookupParent: {
+        sourceField: 'model',
+        targetField: 'cls',
+        sourceLookupType: 'Model',
+        parentLookupType: 'ModelGroup'
+      }
+    }
+  });
+
+  assert.deepEqual(derived.typeFromModelLookupParent, {
+    enabled: true,
+    modelField: 'model',
+    typeField: 'type',
+    sourceLookupType: 'Model',
+    parentLookupType: 'ModelGroup'
+  });
+});
+
+test('validateLabelConfig rejects unsupported derived output field and warns on legacy keys', () => {
+  const invalid = validateLabelConfig({
+    aliases: { cls: ['LegacyType'] },
+    derivedFields: {
+      groupFromLookupParent: {
+        sourceField: 'model',
+        targetField: 'customType'
+      }
+    }
+  });
+
+  assert.equal(invalid.ok, false);
+  assert.equal(invalid.errors.some((error) => error.code === 'derived_type_field_fixed'), true);
+  assert.equal(invalid.warnings.some((warning) => warning.code === 'legacy_aliases_cls'), true);
+  assert.equal(invalid.warnings.some((warning) => warning.code === 'legacy_group_from_lookup_parent'), true);
 });
 
 test('buildFieldMap matches attribute names and descriptions', () => {
@@ -118,12 +185,12 @@ test('cmdbCardToDevice uses class description as class fallback', () => {
   assert.deepEqual(device, {
     inv: 'INV-1',
     model: 'HP LaserJet',
-    cls: 'Принтер',
+    type: 'Принтер',
     sn: 'SN123'
   });
 });
 
-test('cmdbCardToDevice uses lookup display values and can leave group empty for derivation', () => {
+test('cmdbCardToDevice uses lookup display values and can leave type empty for derivation', () => {
   const device = cmdbCardToDevice({
     Code: 'INV-1',
     serialnum: 'SN123',
@@ -137,13 +204,13 @@ test('cmdbCardToDevice uses lookup display values and can leave group empty for 
     sn: 'serialnum',
     model: 'model'
   }, {
-    classFallbackForCls: false
+    classFallbackForType: false
   });
 
   assert.deepEqual(device, {
     inv: 'INV-1',
     model: 'HP 1111',
-    cls: '',
+    type: '',
     sn: 'SN123'
   });
 });
@@ -155,12 +222,12 @@ test('mergeResolvedDevice preserves user-entered values over CMDB values', () =>
   }, {
     inv: 'INV-1',
     model: 'CMDB Model',
-    cls: 'Printer',
+    type: 'Printer',
     sn: 'SN123'
   }), {
     inv: 'INV-1',
     model: 'Manual Model',
-    cls: 'Printer',
+    type: 'Printer',
     sn: 'SN123'
   });
 });
@@ -169,7 +236,7 @@ test('deviceRequiredErrors reports missing label fields', () => {
   const errors = deviceRequiredErrors({ inv: 'INV-1', sn: 'SN123' }, 3);
   assert.deepEqual(errors.map((error) => [error.row, error.field]), [
     [3, 'Тип/Модель'],
-    [3, 'Группа модели']
+    [3, 'Тип']
   ]);
 });
 

@@ -244,7 +244,7 @@
         <div id="deviceListContainer" class="device-list">
             <table>
                 <thead>
-                    <tr><th>№</th><th>Инв. номер</th><th>Группа модели</th><th>Модель</th><th>Серийный номер</th><th>Действие</th></tr>
+                    <tr><th>№</th><th>Инв. номер</th><th>Тип</th><th>Модель</th><th>Серийный номер</th><th>Действие</th></tr>
                 </thead>
                 <tbody id="deviceListBody"></tbody>
             </table>
@@ -264,18 +264,18 @@
 </div>
 
 <script>
-const REQUIRED_FIELDS = ['inv', 'model', 'cls', 'sn'];
+const REQUIRED_FIELDS = ['inv', 'model', 'type', 'sn'];
 const FIELD_LABELS = {
     inv: 'Инв. номер',
     model: 'Тип/Модель',
-    cls: 'Группа модели',
+    type: 'Тип',
     sn: 'Серийный номер'
 };
 const DELIMITERS = { semicolon: ';', comma: ',', tab: '\t' };
 const HEADER_ALIASES = {
     inv: ['Инв. номер', 'Инвентарный номер', 'Инв номер', 'Code', 'code', 'invnet', 'inv', 'inventory', 'inventoryNumber', 'inventoryNo', 'assetTag', 'assetNumber'],
     model: ['Тип/Модель', 'Тип / Модель', 'Тип модель', 'Модель', 'Model', 'model', 'typeModel', 'deviceModel'],
-    cls: ['Группа модели', 'Группа', 'Производитель', 'Класс', 'class', 'cls', 'type', 'category', '_type'],
+    type: ['Тип', 'Группа модели', 'Группа', 'Производитель', 'Класс', 'class', 'cls', 'type', 'category', '_type'],
     sn: ['SN', 'S/N', 'Серийный номер', 'serial', 'serialnum', 'SerialNum', 'serialNumber', 'serialNo', 'serial_num', 'серийный']
 };
 const HEADER_ALIAS_PRIORITY = {
@@ -300,8 +300,9 @@ const HEADER_ALIAS_PRIORITY = {
         SerialNum: 95,
         'Серийный номер': 95
     },
-    cls: {
-        'Группа модели': 100,
+    type: {
+        'Тип': 100,
+        'Группа модели': 90,
         'Группа': 90,
         'Производитель': 90,
         'Класс': 20
@@ -1013,7 +1014,7 @@ function updateDeviceList() {
         const tr = document.createElement('tr');
         appendCell(tr, String(index + 1));
         appendCell(tr, device.inv);
-        appendCell(tr, device.cls);
+        appendCell(tr, device.type);
         appendCell(tr, device.model);
         appendCell(tr, device.sn);
 
@@ -1149,13 +1150,13 @@ function createLabel(container, device, qrUri) {
 
     const info = document.createElement('div');
     info.className = 'lbl-info';
-    const cls = document.createElement('div');
-    const clsStrong = document.createElement('b');
-    clsStrong.textContent = device.cls;
-    cls.appendChild(clsStrong);
+    const type = document.createElement('div');
+    const typeStrong = document.createElement('b');
+    typeStrong.textContent = device.type;
+    type.appendChild(typeStrong);
     const sn = document.createElement('div');
     sn.textContent = `SN: ${device.sn}`;
-    info.appendChild(cls);
+    info.appendChild(type);
     info.appendChild(sn);
 
     const footer = document.createElement('div');

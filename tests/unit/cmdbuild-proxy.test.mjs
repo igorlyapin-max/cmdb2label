@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   isCmdbuildProxyPathAllowed,
   isCmdbuildUiCacheSensitive,
+  isSafeRelativeRequestTarget,
   rewriteCmdbuildManifest,
   rewriteCmdbuildUiHtml
 } from '../../src/server.mjs';
@@ -27,6 +28,13 @@ test('CMDBuild proxy detects cache-sensitive UI resources', () => {
   assert.equal(isCmdbuildUiCacheSensitive('/cmdbuild/ui/cmdbuild/app.js'), true);
   assert.equal(isCmdbuildUiCacheSensitive('/cmdbuild/ui/app/view/custompages/CmdbLabels/CmdbLabels.js'), true);
   assert.equal(isCmdbuildUiCacheSensitive('/cmdbuild/services/rest/v3/sessions/current'), false);
+});
+
+test('CMDBuild proxy rejects absolute or protocol-relative request targets', () => {
+  assert.equal(isSafeRelativeRequestTarget('/cmdbuild/ui/config.js'), true);
+  assert.equal(isSafeRelativeRequestTarget('/cmdbuild/ui/config.js?x=1'), true);
+  assert.equal(isSafeRelativeRequestTarget('//evil.example/cmdbuild/ui/config.js'), false);
+  assert.equal(isSafeRelativeRequestTarget('http://evil.example/cmdbuild/ui/config.js'), false);
 });
 
 test('CMDBuild UI HTML rewrite injects dev cache reset once', () => {

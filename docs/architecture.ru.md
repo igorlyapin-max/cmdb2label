@@ -65,7 +65,7 @@ GET  /metrics
     {
       "inv": "Принтер-001",
       "model": "HP LaserJet",
-      "cls": "HP",
+      "type": "HP",
       "sn": "C2M-CITY-20260523-SN-300"
     }
   ],
@@ -86,7 +86,7 @@ Backend строит каталог доступных классов автом
 - для каждого доступного класса читает `/attributes`;
 - выбирает классы, где найдены алиасы `inv` или `sn`;
 - ищет карточки по `inv` и `sn`;
-- поле `cls` на этикетке означает `Группа модели`; по умолчанию оно выводится из parent lookup значения атрибута, mapped как `model`;
+- поле `type` на этикетке означает `Тип`; по умолчанию оно выводится из parent lookup значения атрибута, mapped как `model`;
 - если CMDBuild filter отличается в конкретной версии, использует ограниченный fallback чтения карточек класса.
 
 Каталог кэшируется per session/config hash, потому что разные пользователи и alias/derived настройки могут видеть разные классы и атрибуты.
@@ -118,17 +118,23 @@ CMDB_LABELS_ALIAS_CONFIG_FILE=/run/config/cmdb2label-aliases.json
   "aliases": {
     "inv": ["Code", "invnet"],
     "model": ["Модель", "model"],
-    "cls": ["Группа модели", "Производитель"],
+    "type": ["Тип", "Группа модели", "Производитель"],
     "sn": ["serialnum", "SerialNumber"]
   },
   "derivedFields": {
-    "groupFromLookupParent": {
+    "typeFromModelLookupParent": {
       "enabled": true,
-      "sourceField": "model",
-      "targetField": "cls"
+      "modelField": "model",
+      "typeField": "type",
+      "sourceLookupType": "Model",
+      "parentLookupType": "ModelGroup"
     }
   }
 }
 ```
+
+Config validation выполняется на старте и в readiness path. Некорректный JSON, нечитаемый файл, alias entry не массивом или `derivedFields.typeFromModelLookupParent.typeField` не равный `"type"` считаются ошибкой конфигурации. Legacy keys `aliases.cls`, `derivedFields.groupFromLookupParent`, `sourceField` и `targetField` принимаются только как migration path и дают warning.
+
+Lookup derivation читает parent lookup модели. Если CMDBuild metadata атрибута модели отдает `lookupType`, `sourceLookupType` можно не задавать. Если parent id приходит как scalar `parent`, задайте `parentLookupType`, чтобы backend резолвил тип по lookup values.
 
 `Verbose` diagnostics включается только временно. Cookie, auth headers, CSRF token, raw CMDBuild payloads и строки результата не пишутся в логи.

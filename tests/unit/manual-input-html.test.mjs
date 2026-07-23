@@ -109,7 +109,7 @@ serialnum: SN-1
 });
 
 test('CSV headers prefer explicit inventory number over technical Code alias', () => {
-  const headerResult = helpers.mapCsvHeaders(['Code', 'Инв. номер', 'serialnum', 'Модель', 'Группа модели']);
+  const headerResult = helpers.mapCsvHeaders(['Code', 'Инв. номер', 'serialnum', 'Модель', 'Тип']);
   assert.equal(headerResult.errors.length, 0);
   assert.equal(headerResult.mapping.inv, 1);
 
@@ -125,7 +125,23 @@ test('CSV headers prefer explicit inventory number over technical Code alias', (
   assert.equal(parsed.device.inv, 'ГКМ1231455');
   assert.equal(parsed.device.sn, 'C2M-CITY-20260523-ARM-SN-001-01');
   assert.equal(parsed.device.model, 'HP / HP 1111');
-  assert.equal(parsed.device.cls, 'HP');
+  assert.equal(parsed.device.type, 'HP');
+});
+
+test('CSV headers keep legacy group alias as type input', () => {
+  const headerResult = helpers.mapCsvHeaders(['Группа модели']);
+  const parsed = helpers.validateCsvRow(['HP'], headerResult.mapping, 2);
+
+  assert.equal(headerResult.mapping.type, 0);
+  assert.equal(parsed.device.type, 'HP');
+});
+
+test('CSV headers prefer explicit type over legacy group and technical type aliases', () => {
+  const headerResult = helpers.mapCsvHeaders(['Группа модели', 'Тип', 'type']);
+  const parsed = helpers.validateCsvRow(['Legacy', 'Primary', 'Technical'], headerResult.mapping, 2);
+
+  assert.equal(headerResult.mapping.type, 1);
+  assert.equal(parsed.device.type, 'Primary');
 });
 
 test('QR UTF-8 encoder matches TextEncoder for Russian and English text', () => {

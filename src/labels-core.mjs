@@ -1,9 +1,9 @@
-export const REQUIRED_FIELDS = ['inv', 'model', 'cls', 'sn'];
+export const REQUIRED_FIELDS = ['inv', 'model', 'type', 'sn'];
 
 export const FIELD_LABELS = {
   inv: 'Инв. номер',
   model: 'Тип/Модель',
-  cls: 'Группа модели',
+  type: 'Тип',
   sn: 'Серийный номер'
 };
 
@@ -33,7 +33,8 @@ export const DEFAULT_FIELD_ALIASES = {
     'typeModel',
     'deviceModel'
   ],
-  cls: [
+  type: [
+    'Тип',
     'Группа модели',
     'Группа',
     'Производитель',
@@ -60,10 +61,12 @@ export const DEFAULT_FIELD_ALIASES = {
 };
 
 export const DEFAULT_DERIVED_FIELDS = {
-  groupFromLookupParent: {
+  typeFromModelLookupParent: {
     enabled: true,
-    sourceField: 'model',
-    targetField: 'cls'
+    modelField: 'model',
+    typeField: 'type',
+    sourceLookupType: '',
+    parentLookupType: ''
   }
 };
 
@@ -78,21 +81,92 @@ export function normalizeAlias(value) {
 
 export function mergeAliasConfig(config = {}) {
   const result = {};
+  const aliases = config.aliases && typeof config.aliases === 'object' && !Array.isArray(config.aliases)
+    ? config.aliases
+    : {};
   for (const field of REQUIRED_FIELDS) {
-    const configured = config.aliases && Array.isArray(config.aliases[field]) ? config.aliases[field] : [];
-    result[field] = uniqueStrings([...DEFAULT_FIELD_ALIASES[field], ...configured]);
+    const configured = aliases && Array.isArray(aliases[field]) ? aliases[field] : [];
+    const legacyConfigured = field === 'type' && Array.isArray(aliases.cls) ? aliases.cls : [];
+    result[field] = uniqueStrings([...DEFAULT_FIELD_ALIASES[field], ...legacyConfigured, ...configured]);
   }
   return result;
 }
 
+function normalizeDerivedRule(rule = {}) {
+  const result = { ...rule };
+  if (!result.modelField && result.sourceField) result.modelField = result.sourceField;
+  if (!result.typeField && result.targetField) result.typeField = result.targetField;
+  if (result.typeField === 'cls') result.typeField = 'type';
+  delete result.sourceField;
+  delete result.targetField;
+  return result;
+}
+
+export function validateLabelConfig(config = {}) {
+  const errors = [];
+  const warnings = [];
+  const addError = (code, path, message) => errors.push({ code, path, message });
+  const addWarning = (code, path, message) => warnings.push({ code, path, message });
+
+  if (!config || typeof config !== 'object' || Array.isArray(config)) {
+    addError('alias_config_object_required', '', 'Alias config must be a JSON object.');
+    return { ok: false, errors, warnings };
+  }
+
+  const aliases = config.aliases;
+  if (aliases !== undefined) {
+    if (!aliases || typeof aliases !== 'object' || Array.isArray(aliases)) {
+      addError('aliases_object_required', 'aliases', 'aliases must be an object.');
+    } else {
+      for (const [name, value] of Object.entries(aliases)) {
+        if (!Array.isArray(value)) addError('alias_array_required', `aliases.${name}`, 'Alias config entries must be arrays.');
+      }
+      if (Array.isArray(aliases.cls)) {
+        addWarning('legacy_aliases_cls', 'aliases.cls', 'aliases.cls is deprecated; use aliases.type.');
+      }
+    }
+  }
+
+  const derivedFields = config.derivedFields;
+  if (derivedFields !== undefined) {
+    if (!derivedFields || typeof derivedFields !== 'object' || Array.isArray(derivedFields)) {
+      addError('derived_fields_object_required', 'derivedFields', 'derivedFields must be an object.');
+    } else {
+      if (derivedFields.groupFromLookupParent) {
+        addWarning('legacy_group_from_lookup_parent', 'derivedFields.groupFromLookupParent', 'groupFromLookupParent is deprecated; use typeFromModelLookupParent.');
+      }
+      const rule = normalizeDerivedRule(derivedFields.typeFromModelLookupParent || derivedFields.groupFromLookupParent || {});
+      if (rule && typeof rule === 'object' && !Array.isArray(rule)) {
+        for (const name of ['modelField', 'typeField', 'sourceLookupType', 'parentLookupType']) {
+          if (rule[name] !== undefined && typeof rule[name] !== 'string') {
+            addError('derived_field_string_required', `derivedFields.typeFromModelLookupParent.${name}`, `${name} must be a string.`);
+          }
+        }
+        const typeField = cleanValue(rule.typeField || DEFAULT_DERIVED_FIELDS.typeFromModelLookupParent.typeField);
+        if (typeField && typeField !== 'type') {
+          addError('derived_type_field_fixed', 'derivedFields.typeFromModelLookupParent.typeField', 'typeField must be "type".');
+        }
+      } else {
+        addError('derived_rule_object_required', 'derivedFields.typeFromModelLookupParent', 'typeFromModelLookupParent must be an object.');
+      }
+    }
+  }
+
+  return { ok: errors.length === 0, errors, warnings };
+}
+
 export function mergeDerivedFieldConfig(config = {}) {
-  const configured = config.derivedFields || {};
-  const configuredRule = configured.groupFromLookupParent || {};
+  const configured = config.derivedFields && typeof config.derivedFields === 'object' && !Array.isArray(config.derivedFields)
+    ? config.derivedFields
+    : {};
+  const legacyRule = normalizeDerivedRule(configured.groupFromLookupParent || {});
+  const configuredRule = normalizeDerivedRule(configured.typeFromModelLookupParent || legacyRule);
   return {
-    groupFromLookupParent: {
-      ...DEFAULT_DERIVED_FIELDS.groupFromLookupParent,
+    typeFromModelLookupParent: {
+      ...DEFAULT_DERIVED_FIELDS.typeFromModelLookupParent,
       ...configuredRule,
-      enabled: configuredRule.enabled === undefined ? DEFAULT_DERIVED_FIELDS.groupFromLookupParent.enabled : Boolean(configuredRule.enabled)
+      typeField: configuredRule.typeField ? configuredRule.typeField : DEFAULT_DERIVED_FIELDS.typeFromModelLookupParent.typeField,
+      enabled: configuredRule.enabled === undefined ? DEFAULT_DERIVED_FIELDS.typeFromModelLookupParent.enabled : Boolean(configuredRule.enabled)
     }
   };
 }
@@ -147,6 +221,7 @@ export function normalizeDraftDevice(input = {}, aliases = DEFAULT_FIELD_ALIASES
   for (const field of REQUIRED_FIELDS) {
     device[field] = cleanValue(input[field]);
   }
+  if (!device.type) device.type = cleanValue(input.cls);
 
   const rawFields = Array.isArray(input.rawFields) ? input.rawFields : [];
   for (const item of rawFields) {
@@ -229,7 +304,7 @@ export function mergeResolvedDevice(inputDevice, resolvedDevice) {
 
 export function cmdbCardToDevice(card = {}, classInfo = {}, fieldMap = {}, options = {}) {
   const settings = {
-    classFallbackForCls: true,
+    classFallbackForType: true,
     ...options
   };
   const device = {};
@@ -239,8 +314,8 @@ export function cmdbCardToDevice(card = {}, classInfo = {}, fieldMap = {}, optio
   }
 
   if (!device.model) device.model = displayCmdbValue(card.Description || card._description);
-  if (!device.cls && settings.classFallbackForCls) {
-    device.cls = displayCmdbValue(card._type || classInfo.description || classInfo.name);
+  if (!device.type && settings.classFallbackForType) {
+    device.type = displayCmdbValue(card._type || classInfo.description || classInfo.name);
   }
 
   return device;

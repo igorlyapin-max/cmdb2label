@@ -25,7 +25,9 @@ test('labels health ready endpoint reports CMDBuild readiness state', { skip: sk
   const json = JSON.parse(result.body);
   assert.equal(json.service, 'cmdb2label');
   assert.equal(typeof json.ready, 'boolean');
-  assert.ok(json.cmdbuild);
+  assert.equal(Object.prototype.hasOwnProperty.call(json, 'cmdbuild'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(json, 'origin'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(json, 'error'), false);
 });
 
 test('labels UI is served from backend-owned route', { skip: skipWhenUnavailable }, async () => {
@@ -34,6 +36,8 @@ test('labels UI is served from backend-owned route', { skip: skipWhenUnavailable
   assert.equal(result.statusCode, 200);
   assert.match(String(result.headers['content-type'] || ''), /^text\/html/);
   assert.match(result.body, /Генератор этикеток/);
+  assert.match(result.body, />Тип</);
+  assert.doesNotMatch(result.body, />Группа модели</);
 });
 
 test('csrf endpoint requires CMDBuild session cookie', { skip: skipWhenUnavailable }, async () => {

@@ -30,6 +30,14 @@ CMDB_LABELS_DIAGNOSTIC_MODE=Basic \
 npm start
 ```
 
+Browser-visible smoke через shared nginx:
+
+```bash
+CMDB_LABELS_PROXY=http://127.0.0.1:8088 npm run test:browser
+```
+
+Smoke открывает `/cmdbuild/labels/ui`, импортирует CSV, проверяет включение кнопки генерации, видимую этикетку, локальный QR `data:image/svg+xml` и блокировку строки с пустым `Тип`.
+
 Production-like запуск должен задавать стабильный CSRF secret:
 
 ```bash
@@ -45,7 +53,7 @@ npm start
 
 ## Shared dev nginx
 
-Используйте существующий nginx проекта `cmdbcustompages` на `8088`. Не запускайте второй front nginx на этом же порту. В его конфиг должны быть добавлены labels routes из [инструкции интеграции nginx](nginx-integration.ru.md).
+Используйте существующий nginx проекта `cmdbcustompages` на `8088`. Не запускайте второй front nginx на этом же порту. В текущем локальном runtime активный template находится в `../cmdbcustompages/nginx/cmdbdynamicpages.conf`; в него должны быть добавлены labels routes из [инструкции интеграции nginx](nginx-integration.ru.md).
 
 Файл `nginx/cmdb2label-dev.conf` из этого репозитория слушает `8095` только как optional labels-only overlay для локальных smoke checks. Он не проксирует общий `/cmdbuild/` и не является пользовательским входом в CMDBuild.
 
@@ -88,6 +96,6 @@ Code;Description;zabbix_main_hostid;hostname;ipaddress;mgmt;serialnum;Модел
 C2M-CITY-20260523-ARM-001-01;АРМ 01 для Test City 001;13734;c2m-arm-city-001-01;192.168.202.35;;C2M-CITY-20260523-ARM-SN-001-01;HP 1111
 ```
 
-Ожидаемый результат: UI дозапрашивает недостающую `Группа модели` через `/cmdbuild/custom-api/labels/resolve`; генерация этикеток активна только когда заполнены `Инв. номер`, `Тип/Модель`, `Группа модели`, `SN`.
+Ожидаемый результат: UI дозапрашивает недостающий `Тип` через `/cmdbuild/custom-api/labels/resolve`; генерация этикеток активна только когда заполнены `Инв. номер`, `Тип/Модель`, `Тип`, `SN`.
 
 Не используйте `http://localhost:8090/cmdbuild/ui/#custompages/CmdbLabels` как рабочий вход: `8090` не обслуживает `/cmdbuild/labels/*` и `/cmdbuild/custom-api/labels/*`. Открывайте CMDBuild через `http://localhost:8088/cmdbuild/`, затем custom page `CmdbLabels`.

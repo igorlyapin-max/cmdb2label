@@ -47,13 +47,14 @@ SN
 C2M-CITY-20260523-SN-300
 ```
 
-Если задан `SN` или `Инв. номер`, backend дозапрашивает недостающие `Инв. номер`, `Тип/Модель`, `Группа модели`, `SN` через CMDBuild REST от имени текущего пользователя. `Группа модели` по умолчанию выводится из parent lookup значения атрибута модели.
+Если задан `SN` или `Инв. номер`, backend дозапрашивает недостающие `Инв. номер`, `Тип/Модель`, `Тип`, `SN` через CMDBuild REST от имени текущего пользователя. `Тип` по умолчанию выводится из parent lookup значения атрибута модели.
 
 ## Основные команды
 
 ```bash
 npm run check
 npm test
+CMDB_LABELS_PROXY=http://127.0.0.1:8088 npm run test:browser
 npm run secret:scan
 npm run build:zip
 npm run register:custompage:dry-run
