@@ -30,6 +30,8 @@ function createHtmlHelpers() {
     extractFunction(html, 'getAliasPriority'),
     extractFunction(html, 'getAliasMatch'),
     extractFunction(html, 'normalizeHeader'),
+    extractFunction(html, 'isHierarchicalModelDisplayName'),
+    extractFunction(html, 'splitHierarchicalModelDisplay'),
     'const ALIAS_LOOKUP = buildAliasLookup();',
     extractFunction(html, 'mapCsvHeaders'),
     extractFunction(html, 'validateCsvRow'),
@@ -84,6 +86,35 @@ HP / HP 1111
   assert.equal(parsed.device.model, 'HP / HP 1111');
 });
 
+test('manual input splits CMDB hierarchical type/model display', () => {
+  const parsed = parseManualDevice(`Code
+7700010000160724
+Описание
+MAC: 44:48:C1:CD:20:3E
+Серийный номер
+CNDDJSTGFT
+Инвентарный номер
+7700010000160724
+Тип / Модель
+ТД WiFi / HPE Aruba IAP-207`);
+
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.device.inv, '7700010000160724');
+  assert.equal(parsed.device.sn, 'CNDDJSTGFT');
+  assert.equal(parsed.device.type, 'ТД WiFi');
+  assert.equal(parsed.device.model, 'HPE Aruba IAP-207');
+});
+
+test('manual input explicit type overrides hierarchical display type', () => {
+  const parsed = parseManualDevice(`Тип / Модель
+Legacy / HP 1111
+Тип
+Primary`);
+
+  assert.equal(parsed.device.type, 'Primary');
+  assert.equal(parsed.device.model, 'HP 1111');
+});
+
 test('manual input uses Code as inventory fallback when explicit inventory is absent', () => {
   const parsed = parseManualDevice(`Code
 C2M-CITY-20260523-ARM-001-01
@@ -126,6 +157,29 @@ test('CSV headers prefer explicit inventory number over technical Code alias', (
   assert.equal(parsed.device.sn, 'C2M-CITY-20260523-ARM-SN-001-01');
   assert.equal(parsed.device.model, 'HP / HP 1111');
   assert.equal(parsed.device.type, 'HP');
+});
+
+test('CSV headers split CMDB hierarchical type/model display', () => {
+  const headerResult = helpers.mapCsvHeaders(['Инвентарный номер', 'Тип / Модель', 'Серийный номер']);
+  const parsed = helpers.validateCsvRow([
+    '7700010000160724',
+    'ТД WiFi / HPE Aruba IAP-207',
+    'CNDDJSTGFT'
+  ], headerResult.mapping, 2);
+
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.device.inv, '7700010000160724');
+  assert.equal(parsed.device.type, 'ТД WiFi');
+  assert.equal(parsed.device.model, 'HPE Aruba IAP-207');
+  assert.equal(parsed.device.sn, 'CNDDJSTGFT');
+});
+
+test('CSV headers do not split ordinary model values with slash', () => {
+  const headerResult = helpers.mapCsvHeaders(['Модель']);
+  const parsed = helpers.validateCsvRow(['HP / HP 1111'], headerResult.mapping, 2);
+
+  assert.equal(parsed.device.type, '');
+  assert.equal(parsed.device.model, 'HP / HP 1111');
 });
 
 test('CSV headers keep legacy group alias as type input', () => {

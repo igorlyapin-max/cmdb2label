@@ -79,6 +79,23 @@ export function normalizeAlias(value) {
     .replace(/[\s._\-\\/():;]+/g, '');
 }
 
+export function isHierarchicalModelDisplayName(name) {
+  const normalized = normalizeAlias(name);
+  return ['типмодель'].includes(normalized);
+}
+
+export function splitHierarchicalModelDisplay(value) {
+  const parts = String(value || '')
+    .split('/')
+    .map((part) => cleanValue(part))
+    .filter(Boolean);
+  if (parts.length < 2) return null;
+  return {
+    type: parts[0],
+    model: parts.slice(1).join(' / ')
+  };
+}
+
 export function mergeAliasConfig(config = {}) {
   const result = {};
   const aliases = config.aliases && typeof config.aliases === 'object' && !Array.isArray(config.aliases)
@@ -224,10 +241,21 @@ export function normalizeDraftDevice(input = {}, aliases = DEFAULT_FIELD_ALIASES
   if (!device.type) device.type = cleanValue(input.cls);
 
   const rawFields = Array.isArray(input.rawFields) ? input.rawFields : [];
+  let pendingHierarchicalType = '';
   for (const item of rawFields) {
     const field = aliasLookup[normalizeAlias(item && item.name)];
-    if (field && !device[field]) device[field] = cleanValue(item && item.value);
+    const value = cleanValue(item && item.value);
+    if (field === 'model' && value && isHierarchicalModelDisplayName(item && item.name)) {
+      const split = splitHierarchicalModelDisplay(value);
+      if (split) {
+        if (!pendingHierarchicalType) pendingHierarchicalType = split.type;
+        if (!device.model) device.model = split.model;
+        continue;
+      }
+    }
+    if (field && !device[field]) device[field] = value;
   }
+  if (!device.type && pendingHierarchicalType) device.type = pendingHierarchicalType;
 
   return {
     ...device,

@@ -636,6 +636,22 @@ function normalizeHeader(header) {
         .replace(/[\s._\-\\/]+/g, '');
 }
 
+function isHierarchicalModelDisplayName(name) {
+    return normalizeHeader(name) === 'типмодель';
+}
+
+function splitHierarchicalModelDisplay(value) {
+    const parts = String(value || '')
+        .split('/')
+        .map(part => part.trim())
+        .filter(Boolean);
+    if (parts.length < 2) return null;
+    return {
+        type: parts[0],
+        model: parts.slice(1).join(' / ')
+    };
+}
+
 function mapCsvHeaders(headers) {
     const mapping = {};
     const priorities = {};
@@ -658,6 +674,10 @@ function mapCsvHeaders(headers) {
         });
     }
 
+    Object.defineProperty(mapping, '__headers', {
+        value: headers.slice(),
+        enumerable: false
+    });
     return { mapping, errors };
 }
 
@@ -672,6 +692,15 @@ function validateCsvRow(row, mapping, rowNumber) {
         const value = String(row[mapping[field]] || '').trim();
         device[field] = value;
     });
+
+    const modelHeader = mapping.__headers && mapping.model !== undefined ? mapping.__headers[mapping.model] : '';
+    if (device.model && isHierarchicalModelDisplayName(modelHeader)) {
+        const split = splitHierarchicalModelDisplay(device.model);
+        if (split) {
+            if (!device.type) device.type = split.type;
+            device.model = split.model;
+        }
+    }
 
     if (!REQUIRED_FIELDS.some(field => device[field])) {
         errors.push({
@@ -886,6 +915,21 @@ function parseManualDevice(text) {
         const match = getAliasMatch(name);
         const field = match && match.field;
         const clean = String(value || '').trim();
+        if (field === 'model' && clean && isHierarchicalModelDisplayName(name)) {
+            const split = splitHierarchicalModelDisplay(clean);
+            if (split) {
+                if (!device.type || 90 > priorities.type) {
+                    device.type = split.type;
+                    priorities.type = 90;
+                }
+                if (!device.model || match.priority > priorities.model) {
+                    device.model = split.model;
+                    priorities.model = match.priority;
+                }
+                if (consumeNextLine) index++;
+                continue;
+            }
+        }
         if (field && clean && (!device[field] || match.priority > priorities[field])) {
             device[field] = clean;
             priorities[field] = match.priority;

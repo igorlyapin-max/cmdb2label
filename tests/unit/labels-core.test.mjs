@@ -7,11 +7,13 @@ import {
   cleanValue,
   cmdbCardToDevice,
   deviceRequiredErrors,
+  isHierarchicalModelDisplayName,
   mergeAliasConfig,
   mergeDerivedFieldConfig,
   mergeResolvedDevice,
   normalizeDraftDevice,
   parseManualAttributes,
+  splitHierarchicalModelDisplay,
   validateLabelConfig
 } from '../../src/labels-core.mjs';
 
@@ -42,6 +44,52 @@ test('normalizeDraftDevice maps Russian and English aliases', () => {
   assert.equal(device.model, 'HP LaserJet');
   assert.equal(device.type, 'HP');
   assert.equal(device.sn, 'SN123');
+});
+
+test('normalizeDraftDevice splits CMDB hierarchical type/model display', () => {
+  const device = normalizeDraftDevice({
+    rawFields: [
+      { name: 'Инвентарный номер', value: '7700010000160724' },
+      { name: 'Серийный номер', value: 'CNDDJSTGFT' },
+      { name: 'Тип / Модель', value: 'ТД WiFi / HPE Aruba IAP-207' }
+    ]
+  });
+
+  assert.equal(device.inv, '7700010000160724');
+  assert.equal(device.type, 'ТД WiFi');
+  assert.equal(device.model, 'HPE Aruba IAP-207');
+  assert.equal(device.sn, 'CNDDJSTGFT');
+});
+
+test('normalizeDraftDevice preserves explicit type over hierarchical display', () => {
+  const device = normalizeDraftDevice({
+    rawFields: [
+      { name: 'Тип / Модель', value: 'Legacy / HP 1111' },
+      { name: 'Тип', value: 'Primary' }
+    ]
+  });
+
+  assert.equal(device.type, 'Primary');
+  assert.equal(device.model, 'HP 1111');
+});
+
+test('normalizeDraftDevice does not split ordinary model display with slash', () => {
+  const device = normalizeDraftDevice({
+    rawFields: [
+      { name: 'Модель', value: 'HP / HP 1111' }
+    ]
+  });
+
+  assert.equal(device.type, '');
+  assert.equal(device.model, 'HP / HP 1111');
+});
+
+test('hierarchical model display helper supports nested model text', () => {
+  assert.equal(isHierarchicalModelDisplayName('Тип / Модель'), true);
+  assert.deepEqual(splitHierarchicalModelDisplay('Сеть / HPE / Aruba IAP-207'), {
+    type: 'Сеть',
+    model: 'HPE / Aruba IAP-207'
+  });
 });
 
 test('normalizeDraftDevice keeps legacy group alias as type input', () => {

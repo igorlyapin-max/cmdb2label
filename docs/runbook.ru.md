@@ -85,6 +85,8 @@ curl -fsS http://127.0.0.1:8094/metrics
 
 По умолчанию `type` на этикетке означает `Тип`: backend берет CMDBuild-атрибут, mapped как `model`, читает его lookup value и выводит parent lookup. Если в конкретной модели CMDBuild это поле заполняется вручную из CSV, можно оставить alias для `type`; если нужно отключить derive, задайте `"enabled": false`.
 
+При copy/paste из UI CMDBuild поле `Тип / Модель` считается display path и разбирается до REST-дозапроса: значение вида `ТД WiFi / HPE Aruba IAP-207` дает `type = "ТД WiFi"` и `model = "HPE Aruba IAP-207"`. Явное поле `Тип` имеет приоритет. Обычное поле `Модель` со slash, например `HP / HP 1111`, не разбирается как display path.
+
 Где править:
 
 - Файл конфигурации: `/etc/cmdb2label/aliases.json`.
