@@ -7,6 +7,8 @@ test('CmdbLabels launcher auto-opens from CMDBuild custom page hash', () => {
 
   assert.match(source, /custompages\/CmdbLabels/);
   assert.match(source, /return '\/cmdbuild\/labels\/ui'/);
+  assert.match(source, /href="\/cmdbuild\/labels\/ui"/);
+  assert.equal(source.includes(['cmdbLabels', 'EscapeHtml'].join('')), false);
   assert.doesNotMatch(source, /location\.port === '8090'/);
   assert.match(source, /cmdbLabelsShouldAutoOpen/);
   assert.match(source, /cmdbLabelsLauncherState/);

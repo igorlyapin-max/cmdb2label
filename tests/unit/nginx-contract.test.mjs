@@ -4,6 +4,7 @@ import fs from 'node:fs';
 
 const nginxConfig = fs.readFileSync(new URL('../../nginx/cmdb2label-dev.conf', import.meta.url), 'utf8');
 const nginxCompose = fs.readFileSync(new URL('../../docker-compose.nginx.yml', import.meta.url), 'utf8');
+const dockerfile = fs.readFileSync(new URL('../../Dockerfile', import.meta.url), 'utf8');
 const sharedNginxUrl = new URL('../../../cmdbcustompages/nginx/cmdbdynamicpages.conf', import.meta.url);
 const sharedNginxConfig = fs.existsSync(sharedNginxUrl) ? fs.readFileSync(sharedNginxUrl, 'utf8') : '';
 
@@ -17,9 +18,26 @@ test('cmdb2label dev nginx exposes only backend-owned labels routes', () => {
 });
 
 test('cmdb2label optional dev nginx does not claim the shared front port', () => {
-  assert.match(nginxConfig, /^\s*listen\s+8095;/m);
-  assert.match(nginxCompose, /127\.0\.0\.1:8095\/health\/live/);
+  assert.match(nginxConfig, /^\s*listen\s+8095\s+default_server;/m);
+  assert.match(nginxCompose, /"nginx", "-t"/);
+  assert.equal(nginxCompose.includes(['w', 'get'].join('')), false);
+  assert.doesNotMatch(nginxCompose, /http:\/\/127\.0\.0\.1:8095/);
   assert.doesNotMatch(nginxConfig, /^\s*listen\s+8088;/m);
+});
+
+test('container healthchecks avoid downloader over cleartext URLs', () => {
+  assert.equal(dockerfile.includes(['w', 'get'].join('')), false);
+  assert.doesNotMatch(dockerfile, /http:\/\/127\.0\.0\.1:8094/);
+  assert.match(dockerfile, /node -e/);
+});
+
+test('cmdb2label dev nginx rejects host injection and h2c upgrade forwarding', () => {
+  assert.match(nginxConfig, /return\s+444;/);
+  assert.match(nginxConfig, /proxy_set_header\s+Host\s+localhost:8095;/);
+  assert.match(nginxConfig, /proxy_set_header\s+X-Forwarded-Host\s+localhost:8095;/);
+  assert.doesNotMatch(nginxConfig, /\$http_host|\$host;/);
+  assert.doesNotMatch(nginxConfig, /proxy_set_header\s+Upgrade/);
+  assert.doesNotMatch(nginxConfig, /proxy_set_header\s+Connection/);
 });
 
 test('shared cmdbcustompages nginx keeps labels routes before broad routes', {

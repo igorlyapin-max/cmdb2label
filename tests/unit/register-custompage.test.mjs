@@ -5,13 +5,16 @@ import os from 'node:os';
 import path from 'node:path';
 import {
   DEFAULT_CUSTOMPAGE_METADATA,
+  RegisterError,
   buildMultipartPayload,
   cleanHeaderValue,
   findMatchingCustomPage,
+  hasZipLocalFileHeader,
   loadConfig,
   normalizeCmdbuildBaseUrl,
   readCookieJar,
-  redactedConfigSummary
+  redactedConfigSummary,
+  resolvePathInside
 } from '../../scripts/register-custompage.mjs';
 
 test('custom page metadata matches CMDBuild registration contract', () => {
@@ -51,16 +54,56 @@ test('buildMultipartPayload includes JSON data and zip file parts', () => {
   assert.match(text, /ZIPDATA/);
 });
 
+test('custom page zip path is restricted to dist by default', () => {
+  assert.throws(
+    () => loadConfig({
+      CMDB_LABELS_CUSTOMPAGE_ZIP: '../outside.zip'
+    }, ['--dry-run']),
+    RegisterError
+  );
+
+  const config = loadConfig({
+    CMDB_LABELS_CUSTOMPAGE_ZIP: 'dist/custom.zip'
+  }, ['--dry-run']);
+  assert.match(config.zipPath, /dist\/custom\.zip$/);
+});
+
+test('external custom page zip requires explicit admin opt-in', () => {
+  const config = loadConfig({
+    CMDB_LABELS_ALLOW_EXTERNAL_ZIP: '1',
+    CMDB_LABELS_CUSTOMPAGE_ZIP: '../outside.zip'
+  }, ['--dry-run']);
+
+  assert.equal(config.allowExternalZip, true);
+  assert.match(config.zipPath, /outside\.zip$/);
+});
+
+test('resolvePathInside rejects traversal outside base directory', () => {
+  const base = path.join(os.tmpdir(), 'cmdb2label-dist');
+  assert.throws(() => resolvePathInside(base, path.join(base, '..', 'x.zip')), RegisterError);
+});
+
+test('hasZipLocalFileHeader validates zip magic bytes', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmdb2label-zip-'));
+  const validZip = path.join(dir, 'ok.zip');
+  const invalidZip = path.join(dir, 'bad.zip');
+  fs.writeFileSync(validZip, Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00]));
+  fs.writeFileSync(invalidZip, Buffer.from('not-zip'));
+
+  assert.equal(hasZipLocalFileHeader(validZip), true);
+  assert.equal(hasZipLocalFileHeader(invalidZip), false);
+});
+
 test('readCookieJar loads HttpOnly Netscape cookies', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmdb2label-cookie-'));
   const jarPath = path.join(dir, 'cookie.txt');
   fs.writeFileSync(jarPath, [
     '# Netscape HTTP Cookie File',
-    '#HttpOnly_127.0.0.1\tFALSE\t/cmdbuild\tFALSE\t0\tCMDBuild-Authorization\tsecret-token',
+    '#HttpOnly_127.0.0.1\tFALSE\t/cmdbuild\tFALSE\t0\tCMDBuild-Authorization\texample-session-value',
     '127.0.0.1\tFALSE\t/cmdbuild\tFALSE\t0\tOther\tvalue'
   ].join('\n'));
 
-  assert.equal(readCookieJar(jarPath), 'CMDBuild-Authorization=secret-token; Other=value');
+  assert.equal(readCookieJar(jarPath), 'CMDBuild-Authorization=example-session-value; Other=value');
 });
 
 test('findMatchingCustomPage detects page by name, alias, or componentId', () => {
@@ -72,16 +115,16 @@ test('findMatchingCustomPage detects page by name, alias, or componentId', () =>
 test('dry-run summary does not expose secrets', () => {
   const config = loadConfig({
     CMDBUILD_ORIGIN: 'http://127.0.0.1:8088',
-    CMDBUILD_AUTHORIZATION: 'very-secret-token',
+    CMDBUILD_AUTHORIZATION: 'example-auth-value',
     CMDBUILD_USERNAME: 'admin',
-    CMDBUILD_PASSWORD: 'secret-password'
+    CMDBUILD_PASSWORD: 'pw'
   }, ['--dry-run']);
   const summary = redactedConfigSummary(config);
   const text = JSON.stringify(summary);
 
   assert.equal(summary.authMode, 'CMDBUILD_AUTHORIZATION');
-  assert.doesNotMatch(text, /very-secret-token/);
-  assert.doesNotMatch(text, /secret-password/);
+  assert.doesNotMatch(text, /example-auth-value/);
+  assert.doesNotMatch(text, /"pw"/);
 });
 
 test('username/password auth defaults to CMDBuild UI scope', () => {

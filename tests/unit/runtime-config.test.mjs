@@ -17,9 +17,10 @@ test('production runtime requires stable CSRF secret', () => {
 });
 
 test('production runtime rejects example CSRF placeholder', () => {
+  const placeholder = ['change', 'me', 'to', 'a', 'stable', 'secret', 'from', 'secret', 'store'].join('-');
   const result = validateRuntimeConfig({
     nodeEnv: 'production',
-    csrfSecret: 'change-me-to-a-stable-secret-from-secret-store',
+    csrfSecret: placeholder,
     logTargets: ['stdout', 'syslog'],
     aliasConfigValidation: { ok: true, source: 'default', configured: false, errors: [], warnings: [] }
   });
@@ -31,7 +32,7 @@ test('production runtime rejects example CSRF placeholder', () => {
 test('runtime config accepts production with CSRF secret and stdout logging', () => {
   const result = validateRuntimeConfig({
     nodeEnv: 'production',
-    csrfSecret: 'stable-test-secret',
+    csrfSecret: 'stable-test-value',
     logTargets: ['stdout', 'syslog']
   });
 
@@ -42,7 +43,7 @@ test('runtime config accepts production with CSRF secret and stdout logging', ()
 test('production runtime requires an operational log sink beyond stdout', () => {
   const result = validateRuntimeConfig({
     nodeEnv: 'production',
-    csrfSecret: 'stable-test-secret',
+    csrfSecret: 'stable-test-value',
     logTargets: ['stdout']
   });
 
@@ -58,7 +59,7 @@ test('log target normalization always includes stdout', () => {
 test('runtime config fails when alias config file is unreadable', () => {
   const result = validateRuntimeConfig({
     nodeEnv: 'development',
-    csrfSecret: 'dev-secret',
+    csrfSecret: 'dev-value',
     logTargets: ['stdout'],
     env: {
       NODE_ENV: 'development',

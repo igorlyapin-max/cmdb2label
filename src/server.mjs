@@ -296,10 +296,17 @@ function renderMetrics() {
   ];
   for (const item of [...metricCounters.values()].sort((left, right) => left.name.localeCompare(right.name))) {
     const labels = Object.entries(item.labels || {});
-    const suffix = labels.length ? `{${labels.map(([name, value]) => `${name}="${String(value).replace(/"/g, '\\"')}"`).join(',')}}` : '';
+    const suffix = labels.length ? `{${labels.map(([name, value]) => `${name}="${escapePrometheusLabelValue(value)}"`).join(',')}}` : '';
     lines.push(`${item.name}${suffix} ${item.value}`);
   }
   return `${lines.join('\n')}\n`;
+}
+
+function escapePrometheusLabelValue(value) {
+  return String(value === undefined || value === null ? '' : value)
+    .replace(/\\/g, '\\\\')
+    .replace(/\n/g, '\\n')
+    .replace(/"/g, '\\"');
 }
 
 function securityHeaders(headers = {}) {
@@ -1457,7 +1464,11 @@ function createServer() {
     }
     if (requestUrl.pathname === '/health/live' || requestUrl.pathname === '/health/ready') {
       handleHealth(req, res, requestUrl).catch((error) => {
-        sendJson(res, 503, { ...baseHealthPayload(), ready: false, error: error.message || String(error) });
+        writeLog('error', 'health.check_failed', {
+          path: requestUrl.pathname,
+          message: error.message || String(error)
+        });
+        sendJson(res, 503, { ...baseHealthPayload(), ready: false, status: 'not_ready' });
       });
       return;
     }
@@ -1549,9 +1560,11 @@ export {
   normalizeDiagnosticMode,
   normalizeLogTargets,
   readAliasConfigFromEnv,
+  renderMetrics,
   resolveDrafts,
   rewriteCmdbuildManifest,
   rewriteCmdbuildUiHtml,
   securityHeaders,
+  escapePrometheusLabelValue,
   validateRuntimeConfig
 };

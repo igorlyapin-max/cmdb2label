@@ -16,6 +16,6 @@ USER cmdb2label
 
 EXPOSE 8094
 
-HEALTHCHECK --interval=10s --timeout=3s --retries=3 CMD wget -q -O /dev/null http://127.0.0.1:8094/health/live || exit 1
+HEALTHCHECK --interval=10s --timeout=3s --retries=3 CMD node -e "require('node:http').get({host:'127.0.0.1',port:8094,path:'/health/live'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
 
 CMD ["node", "src/server.mjs"]

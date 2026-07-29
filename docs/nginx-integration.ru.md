@@ -7,11 +7,6 @@
 Добавьте правила `labels` выше общего `location /cmdbuild/`. В совместном окружении общий `/cmdbuild/` остается в существующем backend `cmdbcustompages` на `8093`, а `cmdb2label` получает только свои два prefix на `8094`.
 
 ```nginx
-map $http_upgrade $connection_upgrade {
-  default upgrade;
-  '' close;
-}
-
 server {
   listen 443 ssl;
   server_name cmdbuild.example.org;
@@ -21,13 +16,11 @@ server {
     proxy_http_version 1.1;
     proxy_buffering off;
 
-    proxy_set_header Host $http_host;
-    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_set_header Host cmdbuild.example.org;
+    proxy_set_header X-Forwarded-Host cmdbuild.example.org;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection $connection_upgrade;
   }
 
   location /cmdbuild/labels/ {
@@ -35,13 +28,11 @@ server {
     proxy_http_version 1.1;
     proxy_buffering off;
 
-    proxy_set_header Host $http_host;
-    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_set_header Host cmdbuild.example.org;
+    proxy_set_header X-Forwarded-Host cmdbuild.example.org;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection $connection_upgrade;
   }
 
   location /cmdbuild/ {
@@ -49,13 +40,11 @@ server {
     proxy_http_version 1.1;
     proxy_buffering off;
 
-    proxy_set_header Host $http_host;
-    proxy_set_header X-Forwarded-Host $http_host;
+    proxy_set_header Host cmdbuild.example.org;
+    proxy_set_header X-Forwarded-Host cmdbuild.example.org;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
     proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection $connection_upgrade;
   }
 }
 ```
@@ -64,8 +53,9 @@ server {
 
 - `location /cmdbuild/custom-api/labels/` и `location /cmdbuild/labels/` должны стоять выше общего `/cmdbuild/`.
 - Обычный `/cmdbuild/` проксируется в существующий backend/CMDBuild proxy `cmdbcustompages` на `8093`; не перехватывайте его в `cmdb2label`.
-- Для общего `/cmdbuild/` передавайте внешний `Host $http_host`. CMDBuild генерирует `/cmdbuild/ui/config.js` из этого host; если отдать upstream host, browser начнет ходить на прямой CMDBuild upstream и session flow сломается.
-- Для backend-owned `labels` routes оставляйте `Host $http_host`, потому что backend использует внешний origin для same-origin/CSRF проверок.
+- Для общего `/cmdbuild/` передавайте фиксированный внешний host из allowlist, например `cmdbuild.example.org`. CMDBuild генерирует `/cmdbuild/ui/config.js` из этого host; если отдать upstream host, browser начнет ходить на прямой CMDBuild upstream и session flow сломается.
+- Для backend-owned `labels` routes используйте тот же фиксированный внешний host, потому что backend использует внешний origin для same-origin/CSRF проверок.
+- Не прокидывайте `Upgrade`/`Connection` в labels routes: WebSocket/h2c upgrade для них не требуется.
 - Не включайте CORS для UI/API, если nginx обслуживает их под тем же origin.
 - Не логируйте raw `Cookie`, `Authorization`, `CMDBuild-Authorization` и `X-CMDB2Label-CSRF` в access/error log с расширенными форматами.
 - Не проксируйте общий `/cmdbuild/` в `cmdb2label`: этот сервис владеет только `/cmdbuild/labels/*` и `/cmdbuild/custom-api/labels/*`.

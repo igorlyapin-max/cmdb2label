@@ -1,12 +1,3 @@
-function cmdbLabelsEscapeHtml(value) {
-    return String(value === undefined || value === null ? '' : value)
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#39;');
-}
-
 function cmdbLabelsClientLog(stage, message) {
     try {
         var image = new Image();
@@ -68,14 +59,13 @@ Ext.define('CMDBuildUI.view.custompages.CmdbLabels.CmdbLabels', {
     title: 'CMDB Labels',
 
     initComponent: function () {
-        var target = cmdbLabelsTargetUrl();
         cmdbLabelsClientLog('initComponent', 'launcher');
         cmdbLabelsScheduleRedirect('initComponent-redirect');
         this.html = [
             '<div style="font-family:Arial,sans-serif;line-height:1.45">',
             '<h2 style="font-size:20px;margin:0 0 8px">CMDB Labels</h2>',
             '<p style="margin:0 0 12px;color:#52606d">Opening label generator...</p>',
-            '<p style="margin:0"><a style="display:inline-block;background:#2563eb;color:#fff;padding:8px 12px;border-radius:4px;text-decoration:none;font-weight:600" href="' + cmdbLabelsEscapeHtml(target) + '">Open label generator</a></p>',
+            '<p style="margin:0"><a style="display:inline-block;background:#2563eb;color:#fff;padding:8px 12px;border-radius:4px;text-decoration:none;font-weight:600" href="/cmdbuild/labels/ui">Open label generator</a></p>',
             '</div>'
         ].join('');
         this.callParent(arguments);

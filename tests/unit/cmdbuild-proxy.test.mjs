@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  escapePrometheusLabelValue,
   isCmdbuildProxyPathAllowed,
   isCmdbuildUiCacheSensitive,
   isSafeRelativeRequestTarget,
@@ -58,4 +59,8 @@ test('CMDBuild manifest rewrite disables Ext cache', () => {
   assert.equal(rewritten.appCacheEnabled, false);
   assert.equal(typeof rewritten.loader.cache, 'string');
   assert.match(rewritten.hash, /^abc-/);
+});
+
+test('Prometheus label escaping covers quotes, slashes, and newlines', () => {
+  assert.equal(escapePrometheusLabelValue('a"b\\c\nz'), 'a\\"b\\\\c\\nz');
 });

@@ -24,6 +24,16 @@ dist/cmdblabels-custompage.zip
 CmdbLabels.js
 ```
 
+Скрипт регистрации по умолчанию принимает zip только из каталога `dist/`, проверяет расширение `.zip`, сигнатуру ZIP и размер артефакта. Для доверенного административного сценария с внешним файлом нужно явно включить opt-in:
+
+```bash
+CMDB_LABELS_ALLOW_EXTERNAL_ZIP=1 \
+CMDB_LABELS_CUSTOMPAGE_ZIP=/trusted/path/cmdblabels-custompage.zip \
+npm run register:custompage:dry-run
+```
+
+Не передавайте в `CMDB_LABELS_CUSTOMPAGE_ZIP` пользовательские пути или файлы вне контролируемого каталога.
+
 JS class:
 
 ```text

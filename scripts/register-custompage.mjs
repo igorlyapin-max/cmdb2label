@@ -2,13 +2,16 @@ import fs from 'node:fs';
 import http from 'node:http';
 import https from 'node:https';
 import path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const DEFAULT_CMDBUILD_ORIGIN = 'http://127.0.0.1:8090';
 const DEFAULT_ZIP_PATH = 'dist/cmdblabels-custompage.zip';
+const PROJECT_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DEFAULT_ZIP_ROOT = path.join(PROJECT_ROOT, 'dist');
 const CUSTOMPAGES_PATH = '/services/rest/v3/custompages';
 const SESSIONS_PATH = '/services/rest/v3/sessions/?ext=true';
 const REQUEST_TIMEOUT_MS = 15000;
+const MAX_ZIP_BYTES = 1024 * 1024;
 
 const DEFAULT_CUSTOMPAGE_METADATA = Object.freeze({
   name: 'CmdbLabels',
@@ -89,7 +92,11 @@ function requireValue(argv, index, arg) {
 function loadConfig(env = process.env, argv = process.argv.slice(2)) {
   const args = parseArgs(argv);
   const cmdbuildOrigin = args.origin || env.CMDBUILD_ORIGIN || DEFAULT_CMDBUILD_ORIGIN;
-  const zipPath = path.resolve(args.zipPath || env.CMDB_LABELS_CUSTOMPAGE_ZIP || DEFAULT_ZIP_PATH);
+  const allowExternalZip = isTruthy(env.CMDB_LABELS_ALLOW_EXTERNAL_ZIP);
+  const zipInput = args.zipPath || env.CMDB_LABELS_CUSTOMPAGE_ZIP || DEFAULT_ZIP_PATH;
+  const zipPath = allowExternalZip
+    ? resolveProjectPath(zipInput)
+    : resolvePathInside(DEFAULT_ZIP_ROOT, zipInput, 'custom page ZIP');
   const cookieHeader = env.CMDBUILD_COOKIE_HEADER || readCookieJar(env.CMDBUILD_COOKIE_JAR || '');
   const password = env.CMDBUILD_PASSWORD || readSecretFile(env.CMDBUILD_PASSWORD_FILE || '');
 
@@ -99,6 +106,7 @@ function loadConfig(env = process.env, argv = process.argv.slice(2)) {
     updateExisting: args.updateExisting,
     cmdbuildBaseUrl: normalizeCmdbuildBaseUrl(cmdbuildOrigin),
     zipPath,
+    allowExternalZip,
     metadata: { ...DEFAULT_CUSTOMPAGE_METADATA },
     auth: {
       authorization: cleanHeaderValue(env.CMDBUILD_AUTHORIZATION),
@@ -114,6 +122,25 @@ function loadConfig(env = process.env, argv = process.argv.slice(2)) {
 
 function isTruthy(value) {
   return ['1', 'true', 'yes', 'on'].includes(String(value || '').trim().toLowerCase());
+}
+
+function resolvePathInside(baseDir, inputPath, label = 'path') {
+  const base = path.resolve(baseDir);
+  const target = resolveProjectPath(inputPath);
+  if (!isPathInside(base, target)) {
+    throw new RegisterError(`${label} must be inside ${path.relative(process.cwd(), base) || base}.`);
+  }
+  return target;
+}
+
+function resolveProjectPath(inputPath) {
+  const input = String(inputPath || '');
+  return path.isAbsolute(input) ? path.resolve(input) : path.resolve(PROJECT_ROOT, input);
+}
+
+function isPathInside(baseDir, targetPath) {
+  const relative = path.relative(path.resolve(baseDir), path.resolve(targetPath));
+  return relative === '' || (!relative.startsWith('..') && !path.isAbsolute(relative));
 }
 
 function cleanHeaderValue(value) {
@@ -169,13 +196,39 @@ function validateConfig(config) {
   if (!config.help && !config.dryRun && authMode(config.auth) === 'missing') {
     errors.push('Set CMDBUILD_AUTHORIZATION, CMDBUILD_COOKIE_HEADER/CMDBUILD_COOKIE_JAR, or CMDBUILD_USERNAME + CMDBUILD_PASSWORD.');
   }
+  if (path.extname(config.zipPath).toLowerCase() !== '.zip') {
+    errors.push(`ZIP artifact must use .zip extension: ${path.basename(config.zipPath)}`);
+  }
+  if (!config.allowExternalZip && !isPathInside(DEFAULT_ZIP_ROOT, config.zipPath)) {
+    errors.push('ZIP artifact must be inside dist/. Set CMDB_LABELS_ALLOW_EXTERNAL_ZIP=1 only for trusted admin uploads.');
+  }
   if (!config.dryRun && !fs.existsSync(config.zipPath)) {
     errors.push(`ZIP artifact is missing: ${path.relative(process.cwd(), config.zipPath)}. Run npm run build:zip first.`);
   }
   if (!config.dryRun && fs.existsSync(config.zipPath) && !fs.statSync(config.zipPath).isFile()) {
     errors.push(`ZIP artifact path is not a file: ${config.zipPath}`);
   }
+  if (!config.dryRun && fs.existsSync(config.zipPath) && fs.statSync(config.zipPath).size > MAX_ZIP_BYTES) {
+    errors.push(`ZIP artifact is too large: ${path.relative(process.cwd(), config.zipPath)}`);
+  }
+  if (!config.dryRun && fs.existsSync(config.zipPath) && !hasZipLocalFileHeader(config.zipPath)) {
+    errors.push(`ZIP artifact does not look like a ZIP file: ${path.relative(process.cwd(), config.zipPath)}`);
+  }
   if (errors.length) throw new RegisterError(errors.join('\n'));
+}
+
+function hasZipLocalFileHeader(filePath) {
+  const fd = fs.openSync(filePath, 'r');
+  try {
+    const header = Buffer.alloc(4);
+    return fs.readSync(fd, header, 0, header.length, 0) === header.length
+      && header[0] === 0x50
+      && header[1] === 0x4b
+      && header[2] === 0x03
+      && header[3] === 0x04;
+  } finally {
+    fs.closeSync(fd);
+  }
 }
 
 async function resolveAuthHeaders(config) {
@@ -315,7 +368,7 @@ function customPageId(item) {
 
 async function uploadCustomPage(config, authHeaders, method, targetPath) {
   const zip = fs.readFileSync(config.zipPath);
-  const { body, contentType } = buildMultipartPayload(config.metadata, zip, path.basename(config.zipPath));
+  const { body, contentType } = buildMultipartPayload(config.metadata, zip, safeMultipartBasename(config.zipPath));
   return requestJson(restUrl(config.cmdbuildBaseUrl, targetPath), {
     method,
     headers: {
@@ -356,6 +409,10 @@ function buildMultipartPayload(metadata, zipBuffer, filename = 'cmdblabels-custo
 
 function escapeMultipartFilename(filename) {
   return String(filename || 'file.zip').replace(/["\r\n]/g, '_');
+}
+
+function safeMultipartBasename(filePath) {
+  return path.basename(String(filePath || 'cmdblabels-custompage.zip'));
 }
 
 async function requestJson(url, options = {}) {
@@ -497,9 +554,11 @@ export {
   cleanHeaderValue,
   extractCustomPageList,
   findMatchingCustomPage,
+  hasZipLocalFileHeader,
   loadConfig,
   normalizeCmdbuildBaseUrl,
   readCookieJar,
   redactedConfigSummary,
-  registerCustomPage
+  registerCustomPage,
+  resolvePathInside
 };
