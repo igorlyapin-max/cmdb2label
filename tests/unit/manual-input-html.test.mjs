@@ -209,3 +209,10 @@ test('UI invalidates stale resolve results when input state changes', () => {
   assert.match(html, /if \(!isCurrentDeviceStateRevision\(operationRevision\)\) return;/);
   assert.match(html, /function clearAll\(\)[\s\S]*bumpDeviceStateRevision\(\);/);
 });
+
+test('static UI exposes fallback app version badge and hides it from print', () => {
+  assert.match(html, /id="appVersion"/);
+  assert.match(html, /class="app-version"/);
+  assert.match(html, /v<span data-app-version>0\.0\.0\.0<\/span>/);
+  assert.match(html, /@media print[\s\S]*\.app-version[\s\S]*display: none !important;/);
+});

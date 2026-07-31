@@ -83,6 +83,7 @@ GET  /metrics
 Backend строит каталог доступных классов автоматически:
 
 - читает `/classes`;
+- если задан `CMDB_LABELS_CLASS_ROOT_PATH`, ограничивает список root class и его descendants до чтения атрибутов;
 - для каждого доступного класса читает `/attributes`;
 - выбирает классы, где найдены алиасы `inv` или `sn`;
 - ищет карточки по `inv` и `sn`;
@@ -90,6 +91,8 @@ Backend строит каталог доступных классов автом
 - если CMDBuild filter отличается в конкретной версии, использует ограниченный fallback чтения карточек класса.
 
 Каталог кэшируется per session/config hash, потому что разные пользователи и alias/derived настройки могут видеть разные классы и атрибуты.
+
+`CMDB_LABELS_CLASS_ROOT_PATH` задается как путь от корня namespace classes, например `/classes/ZabbixMonitoring`. Backend использует последний сегмент как root class name/code и включает descendants по metadata `/classes`: `parent`, `_parent`, `parent_name`, `parentName`, `superclass`, `superClass`, `_superclass`, `ancestors`. Если CMDBuild не отдает связь классов в metadata, будет выбран только сам root class.
 
 ## Runtime controls
 
@@ -104,12 +107,25 @@ CMDB_LABELS_DIAGNOSTIC_MODE=off|Basic|Verbose
 CMDB_LABELS_LOG_TARGET=stdout|stdout,syslog
 CMDB_LABELS_SYSLOG_HOST=127.0.0.1
 CMDB_LABELS_SYSLOG_PORT=514
+CMDB_LABELS_REQUEST_TIMEOUT_MS=10000
+CMDB_LABELS_HEALTH_TIMEOUT_MS=2000
+CMDB_LABELS_CATALOG_TTL_MS=300000
+CMDB_LABELS_MAX_CLASSES=400
+CMDB_LABELS_MAX_SEARCH_CLASSES=160
+CMDB_LABELS_MAX_REST_CALLS=610
 CMDB_LABELS_MAX_RESOLVE_DEVICES=100
+CMDB_LABELS_MAX_MATCHES=50
+CMDB_LABELS_CARD_SEARCH_LIMIT=20
+CMDB_LABELS_CARD_FALLBACK_LIMIT=100
+CMDB_LABELS_BODY_LIMIT_BYTES=524288
+CMDB_LABELS_CLASS_ROOT_PATH=/classes/ZabbixMonitoring
 CMDB_LABELS_ENABLE_CMDBUILD_PROXY=false
 CMDB_LABELS_ALIAS_CONFIG_FILE=/run/config/cmdb2label-aliases.json
 ```
 
-В `NODE_ENV=production` кроме `stdout` должен быть задан дополнительный operational sink, например `CMDB_LABELS_LOG_TARGET=stdout,syslog`.
+Версия, видимая в правом нижнем углу UI, читается только из root `VERSION` в формате `XX.YY.ZZ.NN`. До первого explicit git handoff файл может отсутствовать; в этом случае UI показывает нейтральный fallback `0.0.0.0`. Версия не вычисляется из `package.json`, branch name или Git metadata.
+
+`stdout`/`stderr` обязательны всегда. App-level syslog включается опционально через `CMDB_LABELS_LOG_TARGET=stdout,syslog`; при `CMDB_LABELS_LOG_TARGET=stdout` внешний operational sink должен быть обеспечен deployment/platform слоем, например Docker logging driver, sidecar/agent или централизованный collector.
 
 Пример alias/derive config:
 

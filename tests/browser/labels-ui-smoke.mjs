@@ -52,6 +52,8 @@ async function main() {
       const result = await evaluate(cdp, uiScenarioExpression());
 
       assert.equal(result.title, 'Генератор этикеток 6x3');
+      assert.match(result.version.text, /^v(0\.0\.0\.0|\d{2}\.\d{2}\.\d{2}\.\d{2})$/);
+      assert.equal(result.version.visible, true);
       assert.equal(result.first.generateEnabled, true);
       assert.equal(result.first.dataRows, 1);
       assert.equal(result.first.labels, 1);
@@ -169,6 +171,12 @@ function uiScenarioExpression() {
       tick();
     });
     const byId = (id) => document.getElementById(id);
+    const versionBadge = byId('appVersion');
+    const versionBox = versionBadge ? versionBadge.getBoundingClientRect() : null;
+    const version = {
+      text: versionBadge ? versionBadge.textContent.trim() : '',
+      visible: Boolean(versionBox && versionBox.width > 0 && versionBox.height > 0)
+    };
     const rowText = () => Array.from(document.querySelectorAll('#deviceListBody tr')[0].cells)
       .map((cell) => cell.textContent.trim());
     const state = () => ({
@@ -232,7 +240,7 @@ function uiScenarioExpression() {
       errorsText: byId('validationErrors').textContent
     };
 
-    return { title: document.title, first, legacy, missing };
+    return { title: document.title, version, first, legacy, missing };
   }})()`;
 }
 

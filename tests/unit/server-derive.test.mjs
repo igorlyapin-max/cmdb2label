@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { mergeLabelConfig } from '../../src/labels-core.mjs';
-import { resolveDrafts } from '../../src/server.mjs';
+import { filterClassesByRoot, resolveDrafts } from '../../src/server.mjs';
 
 const fixtures = {
   MetadataAsset: {
@@ -77,6 +77,21 @@ const fixtures = {
       { name: 'Code', description: 'Инв. номер', type: 'string' },
       { name: 'serialnum', description: 'Серийный номер', type: 'string' },
       { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelScalarParent' }
+    ]
+  },
+  ExternalAsset: {
+    serial: 'SN-EXTERNAL',
+    card: {
+      _id: 6,
+      Code: 'INV-EXTERNAL',
+      serialnum: 'SN-EXTERNAL',
+      model: 101,
+      _model_description: 'HP 1111'
+    },
+    attributes: [
+      { name: 'Code', description: 'Инв. номер', type: 'string' },
+      { name: 'serialnum', description: 'Серийный номер', type: 'string' },
+      { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta' }
     ]
   }
 };
@@ -191,14 +206,160 @@ test('resolveDrafts resolves scalar lookup parent id through configured parent t
   assert.equal(result.devices[0].type, 'Workstation');
 });
 
+test('filterClassesByRoot keeps root and descendant classes only', () => {
+  const classes = [
+    { name: 'ZabbixMonitoring', description: 'Root' },
+    { name: 'MetadataAsset', parent_name: 'ZabbixMonitoring' },
+    { name: 'NestedAsset', parent: { name: 'MetadataAsset' } },
+    { name: 'ExternalAsset' }
+  ];
+
+  assert.deepEqual(filterClassesByRoot(classes, '/classes/ZabbixMonitoring').map((item) => item.name), [
+    'ZabbixMonitoring',
+    'MetadataAsset',
+    'NestedAsset'
+  ]);
+});
+
+test('filterClassesByRoot supports documented CMDBuild parent metadata shapes', () => {
+  const classes = [
+    { name: 'ZabbixMonitoring' },
+    { name: 'ParentScalar', parent: 'ZabbixMonitoring' },
+    { name: 'ParentObject', parent: { name: 'ZabbixMonitoring' } },
+    { name: 'PrivateParent', _parent: { code: 'ZabbixMonitoring' } },
+    { name: 'ParentName', parentName: 'ZabbixMonitoring' },
+    { name: 'Superclass', superclass: 'ZabbixMonitoring' },
+    { name: 'SuperClass', superClass: { name: 'ZabbixMonitoring' } },
+    { name: 'PrivateSuperclass', _superclass: 'ZabbixMonitoring' },
+    { name: 'AncestorsArray', ancestors: [{ name: 'Root' }, { name: 'ZabbixMonitoring' }] },
+    { name: 'ExternalAsset' }
+  ];
+
+  assert.deepEqual(filterClassesByRoot(classes, '/classes/ZabbixMonitoring').map((item) => item.name), [
+    'ZabbixMonitoring',
+    'ParentScalar',
+    'ParentObject',
+    'PrivateParent',
+    'ParentName',
+    'Superclass',
+    'SuperClass',
+    'PrivateSuperclass',
+    'AncestorsArray'
+  ]);
+});
+
+test('resolveDrafts limits class discovery to configured root subtree', async () => {
+  const calls = [];
+  const result = await resolveDrafts([{ sn: 'SN-META' }], 'auth-root', mergeLabelConfig(), {
+    classRootPath: '/classes/ZabbixMonitoring',
+    cmdbuildRequest: recordingCmdbuildRequest(calls)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0].model, 'HP 1111');
+  assert.equal(calls.some((pathname) => pathname.includes('/classes/MetadataAsset/attributes')), true);
+  assert.equal(calls.some((pathname) => pathname.includes('/classes/ExternalAsset/attributes')), false);
+});
+
+test('resolveDrafts loads exact root class when it is absent from classes page', async () => {
+  const calls = [];
+  const result = await resolveDrafts([{ sn: 'SN-META' }], 'auth-root-endpoint', mergeLabelConfig(), {
+    classRootPath: '/classes/ZabbixMonitoring',
+    cmdbuildRequest: recordingCmdbuildRequest(calls, rootEndpointCmdbuildRequest)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(calls.some((pathname) => pathname.includes('/classes/ZabbixMonitoring')), true);
+  assert.equal(calls.some((pathname) => pathname.includes('/classes/MetadataAsset/attributes')), true);
+});
+
+test('resolveDrafts does not scan attributes when configured root is unavailable', async () => {
+  const calls = [];
+  const result = await resolveDrafts([{ sn: 'SN-META' }], 'auth-missing-root', mergeLabelConfig(), {
+    classRootPath: '/classes/MissingRoot',
+    cmdbuildRequest: recordingCmdbuildRequest(calls)
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.field === 'CMDBuild'), true);
+  assert.equal(calls.some((pathname) => pathname.includes('/attributes')), false);
+});
+
+test('resolveDrafts keeps separate catalog cache entries per class root', async () => {
+  const calls = [];
+  const request = recordingCmdbuildRequest(calls, splitRootCmdbuildRequest);
+
+  const rootA = await resolveDrafts([{ sn: 'SN-A' }], 'auth-cache-root', mergeLabelConfig(), {
+    classRootPath: '/classes/RootA',
+    cmdbuildRequest: request
+  });
+  const rootB = await resolveDrafts([{ sn: 'SN-B' }], 'auth-cache-root', mergeLabelConfig(), {
+    classRootPath: '/classes/RootB',
+    cmdbuildRequest: request
+  });
+
+  assert.equal(rootA.ok, true);
+  assert.equal(rootA.devices[0]._sourceClass, 'AssetA');
+  assert.equal(rootB.ok, true);
+  assert.equal(rootB.devices[0]._sourceClass, 'AssetB');
+  assert.equal(calls.filter((pathname) => pathname.includes('/classes?')).length, 2);
+});
+
+test('resolveDrafts classRootPath empty override scans all classes from env-root module', async () => {
+  const previous = process.env.CMDB_LABELS_CLASS_ROOT_PATH;
+  process.env.CMDB_LABELS_CLASS_ROOT_PATH = '/classes/ZabbixMonitoring';
+  try {
+    const moduleUrl = new URL(`../../src/server.mjs?empty-root-${Date.now()}`, import.meta.url);
+    const serverModule = await import(moduleUrl.href);
+    const result = await serverModule.resolveDrafts([{ sn: 'SN-EXTERNAL' }], 'auth-empty-root', mergeLabelConfig(), {
+      classRootPath: '',
+      cmdbuildRequest: fakeCmdbuildRequest
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.devices[0]._sourceClass, 'ExternalAsset');
+  } finally {
+    if (previous === undefined) delete process.env.CMDB_LABELS_CLASS_ROOT_PATH;
+    else process.env.CMDB_LABELS_CLASS_ROOT_PATH = previous;
+  }
+});
+
 async function fakeCmdbuildRequest(pathname) {
+  return fakeCmdbuildRequestWithCalls(pathname);
+}
+
+function recordingCmdbuildRequest(calls, handler = fakeCmdbuildRequestWithCalls) {
+  return async (pathname) => {
+    calls.push(pathname);
+    return handler(pathname);
+  };
+}
+
+async function fakeCmdbuildRequestWithCalls(pathname) {
   const requestUrl = new URL(pathname, 'http://cmdbuild.local');
   const decodedPath = decodeURIComponent(requestUrl.pathname);
 
   if (decodedPath === '/cmdbuild/services/rest/v3/classes') {
     return ok({
-      data: Object.keys(fixtures).map((name) => ({ name, description: name, active: true }))
+      data: [
+        { name: 'ZabbixMonitoring', description: 'Zabbix Monitoring', active: true, prototype: true },
+        ...Object.keys(fixtures).map((name) => ({
+          name,
+          description: name,
+          active: true,
+          parent_name: name === 'ExternalAsset' ? '' : 'ZabbixMonitoring'
+        }))
+      ]
     });
+  }
+
+  const classMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)$/);
+  if (classMatch) {
+    const className = classMatch[1];
+    if (className === 'ZabbixMonitoring') {
+      return ok({ data: { name: 'ZabbixMonitoring', description: 'Zabbix Monitoring', active: true, prototype: true } });
+    }
+    return fixtures[className] ? ok({ data: { name: className, description: className, active: true } }) : notFound();
   }
 
   const attributesMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)\/attributes$/);
@@ -221,6 +382,66 @@ async function fakeCmdbuildRequest(pathname) {
   }
 
   return notFound();
+}
+
+async function rootEndpointCmdbuildRequest(pathname) {
+  const requestUrl = new URL(pathname, 'http://cmdbuild.local');
+  const decodedPath = decodeURIComponent(requestUrl.pathname);
+
+  if (decodedPath === '/cmdbuild/services/rest/v3/classes') {
+    return ok({
+      data: [
+        { name: 'MetadataAsset', description: 'MetadataAsset', active: true, parent_name: 'ZabbixMonitoring' },
+        { name: 'ExternalAsset', description: 'ExternalAsset', active: true }
+      ]
+    });
+  }
+
+  return fakeCmdbuildRequestWithCalls(pathname);
+}
+
+async function splitRootCmdbuildRequest(pathname) {
+  const requestUrl = new URL(pathname, 'http://cmdbuild.local');
+  const decodedPath = decodeURIComponent(requestUrl.pathname);
+
+  if (decodedPath === '/cmdbuild/services/rest/v3/classes') {
+    return ok({
+      data: [
+        { name: 'RootA', active: true },
+        { name: 'AssetA', active: true, parent_name: 'RootA' },
+        { name: 'RootB', active: true },
+        { name: 'AssetB', active: true, parent_name: 'RootB' }
+      ]
+    });
+  }
+
+  const classMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)$/);
+  if (classMatch) return ok({ data: { name: classMatch[1], active: true } });
+
+  const attributesMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)\/attributes$/);
+  if (attributesMatch && ['AssetA', 'AssetB'].includes(attributesMatch[1])) {
+    return ok({
+      data: [
+        { name: 'Code', description: 'Инв. номер', type: 'string' },
+        { name: 'serialnum', description: 'Серийный номер', type: 'string' },
+        { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta' }
+      ]
+    });
+  }
+
+  const cardsMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)\/cards$/);
+  if (cardsMatch) {
+    const className = cardsMatch[1];
+    const serial = className === 'AssetA' ? 'SN-A' : className === 'AssetB' ? 'SN-B' : '';
+    const filter = requestUrl.searchParams.get('filter') || '';
+    return ok({
+      data: filter.includes(serial)
+        ? [{ _id: className, Code: `INV-${className}`, serialnum: serial, model: 101, _model_description: 'HP 1111' }]
+        : []
+    });
+  }
+
+  return fakeCmdbuildRequestWithCalls(pathname);
 }
 
 function ok(json) {

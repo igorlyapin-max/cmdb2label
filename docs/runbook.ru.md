@@ -12,8 +12,8 @@ curl -i http://127.0.0.1:8094/cmdbuild/custom-api/labels/health/ready
 ```
 
 - `/health/live` проверяет, что Node process отвечает на HTTP.
-- `/health/ready` проверяет доступность CMDBuild upstream.
-- `503` на readiness при недоступном CMDBuild является корректным fail-closed состоянием.
+- `/health/ready` проверяет runtime config и доступность CMDBuild upstream.
+- `503` на readiness при невалидном config или недоступном CMDBuild является корректным fail-closed состоянием.
 
 ## Diagnostics
 
@@ -39,7 +39,9 @@ CMDB_LABELS_SYSLOG_PROTOCOL=udp
 CMDB_LABELS_SYSLOG_FACILITY=local0
 ```
 
-В `NODE_ENV=production` используйте `CMDB_LABELS_LOG_TARGET=stdout,syslog` или другой поддержанный дополнительный sink; один `stdout` не проходит startup validation.
+Syslog является опциональной app-level возможностью. Если используется `CMDB_LABELS_LOG_TARGET=stdout`, внешний operational sink должен быть обеспечен deployment/platform слоем: Docker logging driver, syslog/Fluent Bit/Filebeat sidecar, collector/agent, ELK/OpenSearch pipeline или аналог.
+
+Если используется `CMDB_LABELS_LOG_TARGET=stdout,syslog`, backend валидирует `CMDB_LABELS_SYSLOG_HOST`, `CMDB_LABELS_SYSLOG_PORT`, `CMDB_LABELS_SYSLOG_PROTOCOL` и `CMDB_LABELS_SYSLOG_FACILITY` на старте и в readiness.
 
 Статус логирования:
 
@@ -50,6 +52,16 @@ curl -i \
 ```
 
 Endpoint проверяет живую CMDBuild session cookie. Без cookie или с истекшей сессией ответ должен быть `401`.
+
+## Версия UI
+
+В правом нижнем углу UI отображается версия приложения.
+
+- Source of truth: root `VERSION`.
+- Формат файла: `XX.YY.ZZ.NN` плюс trailing newline.
+- Если `VERSION` отсутствует до первого explicit git handoff, UI показывает fallback `0.0.0.0`.
+- Не создавайте `VERSION` вручную для локального запуска; файл обновляется в handoff/release workflow вместе с Git tag.
+- Runtime не берет версию из `package.json`, branch name или Git metadata.
 
 ## Metrics
 
@@ -107,6 +119,34 @@ Lookup-настройки:
 
 ```bash
 CMDB_LABELS_ALIAS_CONFIG_FILE=/etc/cmdb2label/aliases.json npm start
+```
+
+## Ограничение области поиска классов
+
+По умолчанию backend строит catalog по всем доступным пользователю CMDBuild classes до лимита `CMDB_LABELS_MAX_CLASSES`. Для customer runtime задайте виртуальный корень поиска:
+
+```bash
+CMDB_LABELS_CLASS_ROOT_PATH=/classes/ZabbixMonitoring
+```
+
+Формат значения - путь от корня namespace classes, сегменты разделяются `/`: `/classes/<ClassName>` или `/classes/<ParentName>/<ClassName>`. Backend использует последний сегмент как root class name/code и включает root plus descendants по metadata `/classes`: `parent`, `_parent`, `parent_name`, `parentName`, `superclass`, `superClass`, `_superclass`, `ancestors`.
+
+Для текущего стенда используйте `/classes/ZabbixMonitoring`. Если CMDBuild не отдает parent/ancestor metadata в `/classes`, backend сможет выбрать только сам `ZabbixMonitoring`; в этом случае нужные asset classes должны быть видимы как descendants в metadata или root нужно выставить ближе к реальным searchable classes.
+
+REST/search лимиты:
+
+```bash
+CMDB_LABELS_REQUEST_TIMEOUT_MS=10000
+CMDB_LABELS_HEALTH_TIMEOUT_MS=2000
+CMDB_LABELS_CATALOG_TTL_MS=300000
+CMDB_LABELS_MAX_CLASSES=400
+CMDB_LABELS_MAX_SEARCH_CLASSES=160
+CMDB_LABELS_MAX_REST_CALLS=610
+CMDB_LABELS_MAX_RESOLVE_DEVICES=100
+CMDB_LABELS_MAX_MATCHES=50
+CMDB_LABELS_CARD_SEARCH_LIMIT=20
+CMDB_LABELS_CARD_FALLBACK_LIMIT=100
+CMDB_LABELS_BODY_LIMIT_BYTES=524288
 ```
 
 ## Типовые incidents
@@ -174,6 +214,7 @@ curl -i http://<host>/cmdbuild/custom-api/labels/session
 - что атрибут модели совпадает с aliases для `model` и является lookup с parent lookup, если нужно автоматически заполнить `Тип`;
 - `sourceLookupType` и `parentLookupType` в `/etc/cmdb2label/aliases.json`, если CMDBuild не отдает lookup metadata или parent lookup type;
 - `CMDB_LABELS_ALIAS_CONFIG_FILE`, если коды атрибутов нестандартные;
+- `CMDB_LABELS_CLASS_ROOT_PATH`: root class должен быть видим текущему CMDBuild-пользователю, а нужные классы оборудования должны входить в его subtree;
 - лимиты `CMDB_LABELS_MAX_CLASSES`, `CMDB_LABELS_MAX_SEARCH_CLASSES`, `CMDB_LABELS_MAX_REST_CALLS`.
 
 ### Readiness `503`

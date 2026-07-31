@@ -38,6 +38,8 @@ test('labels UI is served from backend-owned route', { skip: skipWhenUnavailable
   assert.match(result.body, /Генератор этикеток/);
   assert.match(result.body, />Тип</);
   assert.doesNotMatch(result.body, />Группа модели</);
+  assert.match(result.body, /id="appVersion"/);
+  assert.match(result.body, /v<span data-app-version>(0\.0\.0\.0|\d{2}\.\d{2}\.\d{2}\.\d{2})<\/span>/);
 });
 
 test('csrf endpoint requires CMDBuild session cookie', { skip: skipWhenUnavailable }, async () => {

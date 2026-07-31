@@ -61,19 +61,23 @@ const UI_PREFIX = '/cmdbuild/labels/ui';
 const API_PREFIX = '/cmdbuild/custom-api/labels';
 const ROOT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const UI_HTML_PATH = process.env.CMDB_LABELS_UI_HTML || path.join(ROOT_DIR, 'cmdb2label.html');
+const VERSION_FILE_PATH = path.join(ROOT_DIR, 'VERSION');
+const APP_VERSION_FALLBACK = '0.0.0.0';
+const APP_VERSION_PATTERN = /^\d{2}\.\d{2}\.\d{2}\.\d{2}$/;
 const DEV_CACHE_BUSTER = String(Date.now());
-const REQUEST_TIMEOUT_MS = Math.max(500, Number(process.env.CMDB_LABELS_REQUEST_TIMEOUT_MS || 10000) || 10000);
-const HEALTH_TIMEOUT_MS = Math.max(300, Number(process.env.CMDB_LABELS_HEALTH_TIMEOUT_MS || 2000) || 2000);
-const CATALOG_TTL_MS = Math.max(10_000, Number(process.env.CMDB_LABELS_CATALOG_TTL_MS || 300_000) || 300_000);
-const MAX_CLASSES = Math.max(1, Number(process.env.CMDB_LABELS_MAX_CLASSES || 400) || 400);
-const MAX_SEARCH_CLASSES = Math.max(1, Number(process.env.CMDB_LABELS_MAX_SEARCH_CLASSES || 160) || 160);
-const MAX_MATCHES = Math.max(1, Number(process.env.CMDB_LABELS_MAX_MATCHES || 50) || 50);
+const REQUEST_TIMEOUT_MS = readRuntimeInteger('CMDB_LABELS_REQUEST_TIMEOUT_MS', 10000, 500, 300000);
+const HEALTH_TIMEOUT_MS = readRuntimeInteger('CMDB_LABELS_HEALTH_TIMEOUT_MS', 2000, 300, 60000);
+const CATALOG_TTL_MS = readRuntimeInteger('CMDB_LABELS_CATALOG_TTL_MS', 300_000, 10_000, 86_400_000);
+const MAX_CLASSES = readRuntimeInteger('CMDB_LABELS_MAX_CLASSES', 400, 1, 10000);
+const MAX_SEARCH_CLASSES = readRuntimeInteger('CMDB_LABELS_MAX_SEARCH_CLASSES', 160, 1, 10000);
+const MAX_MATCHES = readRuntimeInteger('CMDB_LABELS_MAX_MATCHES', 50, 1, 1000);
 const DEFAULT_MAX_REST_CALLS = Math.max(250, MAX_CLASSES + MAX_SEARCH_CLASSES + 50);
-const MAX_REST_CALLS = Math.max(10, Number(process.env.CMDB_LABELS_MAX_REST_CALLS || DEFAULT_MAX_REST_CALLS) || DEFAULT_MAX_REST_CALLS);
-const MAX_RESOLVE_DEVICES = Math.max(1, Number(process.env.CMDB_LABELS_MAX_RESOLVE_DEVICES || 100) || 100);
-const CARD_SEARCH_LIMIT = Math.max(1, Number(process.env.CMDB_LABELS_CARD_SEARCH_LIMIT || 20) || 20);
-const CARD_FALLBACK_LIMIT = Math.max(CARD_SEARCH_LIMIT, Number(process.env.CMDB_LABELS_CARD_FALLBACK_LIMIT || 100) || 100);
-const BODY_LIMIT_BYTES = Math.max(1024, Number(process.env.CMDB_LABELS_BODY_LIMIT_BYTES || 512 * 1024) || 512 * 1024);
+const MAX_REST_CALLS = readRuntimeInteger('CMDB_LABELS_MAX_REST_CALLS', DEFAULT_MAX_REST_CALLS, 10, 50000);
+const MAX_RESOLVE_DEVICES = readRuntimeInteger('CMDB_LABELS_MAX_RESOLVE_DEVICES', 100, 1, 10000);
+const CARD_SEARCH_LIMIT = readRuntimeInteger('CMDB_LABELS_CARD_SEARCH_LIMIT', 20, 1, 1000);
+const CARD_FALLBACK_LIMIT = Math.max(CARD_SEARCH_LIMIT, readRuntimeInteger('CMDB_LABELS_CARD_FALLBACK_LIMIT', 100, 1, 5000));
+const BODY_LIMIT_BYTES = readRuntimeInteger('CMDB_LABELS_BODY_LIMIT_BYTES', 512 * 1024, 1024, 10 * 1024 * 1024);
+const CLASS_ROOT_PATH = normalizeClassRootPath(process.env.CMDB_LABELS_CLASS_ROOT_PATH || '').path;
 const CSRF_SECRET = process.env.CMDB_LABELS_CSRF_SECRET || crypto.randomBytes(32).toString('hex');
 const DIAGNOSTIC_MODE = normalizeDiagnosticMode(process.env.CMDB_LABELS_DIAGNOSTIC_MODE || 'off');
 const LOG_LEVEL = normalizeLogLevel(process.env.CMDB_LABELS_LOG_LEVEL || 'info');
@@ -95,6 +99,76 @@ const catalogCache = new Map();
 const metricCounters = new Map();
 
 let shuttingDown = false;
+
+function integerConfigSpecs(defaultMaxRestCalls = DEFAULT_MAX_REST_CALLS) {
+  return [
+    { env: 'CMDB_LABELS_REQUEST_TIMEOUT_MS', defaultValue: 10000, min: 500, max: 300000 },
+    { env: 'CMDB_LABELS_HEALTH_TIMEOUT_MS', defaultValue: 2000, min: 300, max: 60000 },
+    { env: 'CMDB_LABELS_CATALOG_TTL_MS', defaultValue: 300_000, min: 10_000, max: 86_400_000 },
+    { env: 'CMDB_LABELS_MAX_CLASSES', defaultValue: 400, min: 1, max: 10000 },
+    { env: 'CMDB_LABELS_MAX_SEARCH_CLASSES', defaultValue: 160, min: 1, max: 10000 },
+    { env: 'CMDB_LABELS_MAX_REST_CALLS', defaultValue: defaultMaxRestCalls, min: 10, max: 50000 },
+    { env: 'CMDB_LABELS_MAX_RESOLVE_DEVICES', defaultValue: 100, min: 1, max: 10000 },
+    { env: 'CMDB_LABELS_MAX_MATCHES', defaultValue: 50, min: 1, max: 1000 },
+    { env: 'CMDB_LABELS_CARD_SEARCH_LIMIT', defaultValue: 20, min: 1, max: 1000 },
+    { env: 'CMDB_LABELS_CARD_FALLBACK_LIMIT', defaultValue: 100, min: 1, max: 5000 },
+    { env: 'CMDB_LABELS_BODY_LIMIT_BYTES', defaultValue: 512 * 1024, min: 1024, max: 10 * 1024 * 1024 }
+  ];
+}
+
+function parseRuntimeInteger(raw, spec) {
+  const text = String(raw === undefined ? '' : raw).trim();
+  if (!text) return { ok: true, value: spec.defaultValue, configured: false };
+  if (!/^\d+$/.test(text)) {
+    return {
+      ok: false,
+      value: spec.defaultValue,
+      configured: true,
+      error: runtimeIntegerError(spec, `must be an integer between ${spec.min} and ${spec.max}`)
+    };
+  }
+  const value = Number(text);
+  if (!Number.isSafeInteger(value) || value < spec.min || value > spec.max) {
+    return {
+      ok: false,
+      value: spec.defaultValue,
+      configured: true,
+      error: runtimeIntegerError(spec, `must be between ${spec.min} and ${spec.max}`)
+    };
+  }
+  return { ok: true, value, configured: true };
+}
+
+function runtimeIntegerError(spec, detail) {
+  return {
+    code: 'runtime_integer_invalid',
+    env: spec.env,
+    message: `${spec.env} ${detail}.`
+  };
+}
+
+function readRuntimeInteger(envName, defaultValue, min, max) {
+  return parseRuntimeInteger(process.env[envName], { env: envName, defaultValue, min, max }).value;
+}
+
+function validateRuntimeIntegers(env = process.env) {
+  const maxClasses = parseRuntimeInteger(env.CMDB_LABELS_MAX_CLASSES, {
+    env: 'CMDB_LABELS_MAX_CLASSES',
+    defaultValue: 400,
+    min: 1,
+    max: 10000
+  }).value;
+  const maxSearchClasses = parseRuntimeInteger(env.CMDB_LABELS_MAX_SEARCH_CLASSES, {
+    env: 'CMDB_LABELS_MAX_SEARCH_CLASSES',
+    defaultValue: 160,
+    min: 1,
+    max: 10000
+  }).value;
+  const defaultMaxRestCalls = Math.max(250, maxClasses + maxSearchClasses + 50);
+  const results = integerConfigSpecs(defaultMaxRestCalls).map((spec) => parseRuntimeInteger(env[spec.env], spec));
+  const errors = results.filter((result) => !result.ok).map((result) => result.error);
+  return { ok: errors.length === 0, errors };
+}
 
 function normalizeDiagnosticMode(value) {
   const text = String(value || '').trim().toLowerCase();
@@ -133,6 +207,33 @@ function normalizeSyslogProtocol(value) {
 function normalizeSyslogFacility(value) {
   const text = String(value || '').trim().toLowerCase();
   return Object.prototype.hasOwnProperty.call(syslogFacilityCodes, text) ? text : 'local0';
+}
+
+function normalizeClassRootPath(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return { ok: true, path: '', rootName: '', segments: [] };
+  const withoutLeadingSlash = raw.replace(/^\/+/, '').replace(/\/+$/, '');
+  const segments = withoutLeadingSlash.split('/').map((item) => item.trim()).filter(Boolean);
+  if (segments[0] !== 'classes' || segments.length < 2) {
+    return {
+      ok: false,
+      path: raw,
+      rootName: '',
+      segments,
+      error: {
+        code: 'class_root_path_invalid',
+        env: 'CMDB_LABELS_CLASS_ROOT_PATH',
+        message: 'CMDB_LABELS_CLASS_ROOT_PATH must be empty or use /classes/<ClassName> format.'
+      }
+    };
+  }
+  const classSegments = segments.slice(1);
+  return {
+    ok: true,
+    path: `/classes/${classSegments.join('/')}`,
+    rootName: classSegments[classSegments.length - 1],
+    segments
+  };
 }
 
 function logLevelEnabled(level) {
@@ -216,6 +317,8 @@ function validateRuntimeConfig(input = {}) {
   const csrfSecret = String(input.csrfSecret === undefined ? env.CMDB_LABELS_CSRF_SECRET || '' : input.csrfSecret || '').trim();
   const logTargets = input.logTargets || LOG_TARGETS;
   const aliasConfigValidation = input.aliasConfigValidation || readAliasConfigFromEnv(env);
+  const classRoot = normalizeClassRootPath(env.CMDB_LABELS_CLASS_ROOT_PATH || '');
+  const integerValidation = validateRuntimeIntegers(env);
   const errors = [];
   const warnings = [];
 
@@ -240,13 +343,6 @@ function validateRuntimeConfig(input = {}) {
       message: 'Structured logs must always include stdout/stderr.'
     });
   }
-  if (nodeEnv.toLowerCase() === 'production' && (!Array.isArray(logTargets) || !logTargets.some((target) => target !== 'stdout'))) {
-    errors.push({
-      code: 'operational_log_sink_required',
-      env: 'CMDB_LABELS_LOG_TARGET',
-      message: 'Production startup requires an operational log sink in addition to stdout, for example syslog.'
-    });
-  }
   if (DIAGNOSTIC_MODE === 'Verbose' && nodeEnv.toLowerCase() === 'production') {
     warnings.push({
       code: 'verbose_diagnostic_in_production',
@@ -254,6 +350,13 @@ function validateRuntimeConfig(input = {}) {
       message: 'Verbose diagnostics should be enabled only temporarily.'
     });
   }
+  if (!classRoot.ok) {
+    errors.push(classRoot.error);
+  }
+  if (Array.isArray(logTargets) && logTargets.includes('syslog')) {
+    errors.push(...validateSyslogConfig(env));
+  }
+  errors.push(...integerValidation.errors);
   errors.push(...aliasConfigValidation.errors);
   warnings.push(...aliasConfigValidation.warnings);
 
@@ -262,6 +365,10 @@ function validateRuntimeConfig(input = {}) {
     nodeEnv,
     diagnosticMode: DIAGNOSTIC_MODE,
     logTargets,
+    classRoot: {
+      path: classRoot.ok ? classRoot.path : String(env.CMDB_LABELS_CLASS_ROOT_PATH || '').trim(),
+      rootName: classRoot.ok ? classRoot.rootName : ''
+    },
     aliasConfig: {
       source: aliasConfigValidation.source,
       configured: aliasConfigValidation.configured
@@ -271,11 +378,51 @@ function validateRuntimeConfig(input = {}) {
   };
 }
 
+function validateSyslogConfig(env = process.env) {
+  const errors = [];
+  const host = String(env.CMDB_LABELS_SYSLOG_HOST || SYSLOG_HOST || '').trim();
+  const portText = String(env.CMDB_LABELS_SYSLOG_PORT || SYSLOG_PORT || '').trim();
+  const protocol = String(env.CMDB_LABELS_SYSLOG_PROTOCOL || SYSLOG_PROTOCOL || '').trim().toLowerCase();
+  const facility = String(env.CMDB_LABELS_SYSLOG_FACILITY || SYSLOG_FACILITY || '').trim().toLowerCase();
+
+  if (!host) {
+    errors.push({
+      code: 'syslog_host_required',
+      env: 'CMDB_LABELS_SYSLOG_HOST',
+      message: 'Syslog logging requires CMDB_LABELS_SYSLOG_HOST.'
+    });
+  }
+  if (!/^\d+$/.test(portText) || Number(portText) < 1 || Number(portText) > 65535) {
+    errors.push({
+      code: 'syslog_port_invalid',
+      env: 'CMDB_LABELS_SYSLOG_PORT',
+      message: 'CMDB_LABELS_SYSLOG_PORT must be an integer between 1 and 65535.'
+    });
+  }
+  if (!['udp', 'tcp'].includes(protocol)) {
+    errors.push({
+      code: 'syslog_protocol_invalid',
+      env: 'CMDB_LABELS_SYSLOG_PROTOCOL',
+      message: 'CMDB_LABELS_SYSLOG_PROTOCOL must be udp or tcp.'
+    });
+  }
+  if (!Object.prototype.hasOwnProperty.call(syslogFacilityCodes, facility)) {
+    errors.push({
+      code: 'syslog_facility_invalid',
+      env: 'CMDB_LABELS_SYSLOG_FACILITY',
+      message: 'CMDB_LABELS_SYSLOG_FACILITY is not supported.'
+    });
+  }
+
+  return errors;
+}
+
 function runtimeConfigSummary(validation = validateRuntimeConfig()) {
   return {
     nodeEnv: validation.nodeEnv || 'development',
     diagnosticMode: validation.diagnosticMode,
     logTargets: validation.logTargets,
+    classRoot: validation.classRoot,
     aliasConfig: validation.aliasConfig,
     errors: validation.errors.map((item) => item.code),
     warnings: validation.warnings.map((item) => item.code)
@@ -672,8 +819,8 @@ function sanitizeSession(data) {
 
 async function readinessPayload() {
   const payload = baseHealthPayload();
-  const aliasConfigValidation = readAliasConfigFromEnv();
-  if (!aliasConfigValidation.ok) {
+  const runtimeValidation = validateRuntimeConfig();
+  if (!runtimeValidation.ok) {
     return {
       ...payload,
       ready: false,
@@ -704,6 +851,106 @@ function baseHealthPayload() {
     startedAt: STARTED_AT.toISOString(),
     uptimeSec: Math.round(process.uptime())
   };
+}
+
+function classIdentifierNames(item = {}) {
+  return uniqueStrings([
+    item.name,
+    item.code,
+    item.Code,
+    item._name,
+    item._code
+  ].map(cleanValue));
+}
+
+function classReferenceNames(value) {
+  if (!value) return [];
+  if (Array.isArray(value)) return uniqueStrings(value.flatMap(classReferenceNames));
+  if (typeof value === 'object') {
+    return uniqueStrings([
+      value.name,
+      value.code,
+      value.Code,
+      value._name,
+      value._code
+    ].map(cleanValue));
+  }
+  return [cleanValue(value)].filter(Boolean);
+}
+
+function classParentNames(item = {}) {
+  return uniqueStrings([
+    item.parent,
+    item._parent,
+    item.parent_name,
+    item.parentName,
+    item.parentCode,
+    item.superclass,
+    item.superClass,
+    item._superclass,
+    item.ancestors,
+    item._ancestors
+  ].flatMap(classReferenceNames));
+}
+
+function filterClassesByRoot(classes = [], classRootPath = '') {
+  const root = normalizeClassRootPath(classRootPath);
+  if (!root.ok || !root.rootName) return classes;
+
+  const normalizedRoot = cleanValue(root.rootName);
+  const included = new Set();
+  const result = [];
+
+  for (const item of classes) {
+    const names = classIdentifierNames(item);
+    if (names.includes(normalizedRoot)) {
+      for (const name of names) included.add(name);
+      result.push(item);
+    }
+  }
+
+  if (!result.length) return [];
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const item of classes) {
+      const names = classIdentifierNames(item);
+      if (names.some((name) => included.has(name))) continue;
+      if (!classParentNames(item).some((name) => included.has(name))) continue;
+      for (const name of names) included.add(name);
+      result.push(item);
+      changed = true;
+    }
+  }
+
+  return result;
+}
+
+function mergeClassLists(...lists) {
+  const result = [];
+  const seen = new Set();
+  for (const item of lists.flat()) {
+    if (!item || typeof item !== 'object') continue;
+    const names = classIdentifierNames(item);
+    const key = names[0] || JSON.stringify(item);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    result.push(item);
+  }
+  return result;
+}
+
+async function loadRootClass(authToken, rootName, context) {
+  const name = cleanValue(rootName);
+  if (!name) return null;
+  const response = await countedCmdbuildRequest(`/cmdbuild/services/rest/v3/classes/${encodeURIComponent(name)}`, authToken, context);
+  if (!response.ok) {
+    if ([401, 403, 404].includes(response.statusCode)) return null;
+    throw new Error(`CMDBuild root class request failed with HTTP ${response.statusCode}`);
+  }
+  const data = response.json && response.json.data ? response.json.data : response.json;
+  return data && typeof data === 'object' ? data : null;
 }
 
 function readAliasConfigFromEnv(env = process.env) {
@@ -779,25 +1026,27 @@ function loadAliasConfig() {
   return validation.config;
 }
 
-function authCacheKey(authToken, labelConfig = {}) {
+function authCacheKey(authToken, labelConfig = {}, classRootPath = '') {
   return crypto
     .createHash('sha256')
     .update(JSON.stringify({
       authToken: String(authToken || ''),
       aliases: labelConfig.aliases || {},
-      derivedFields: labelConfig.derivedFields || {}
+      derivedFields: labelConfig.derivedFields || {},
+      classRootPath: normalizeClassRootPath(classRootPath).path
     }))
     .digest('hex')
     .slice(0, 16);
 }
 
 async function getClassCatalog(authToken, labelConfig, context) {
-  const key = authCacheKey(authToken, labelConfig);
+  const classRootPath = context.classRootPath === undefined ? CLASS_ROOT_PATH : context.classRootPath;
+  const key = authCacheKey(authToken, labelConfig, classRootPath);
   const cached = catalogCache.get(key);
   if (cached && cached.expiresAt > Date.now()) return cached.value;
   if (cached && cached.promise) return cached.promise;
 
-  const promise = loadClassCatalog(authToken, labelConfig, context)
+  const promise = loadClassCatalog(authToken, labelConfig, context, classRootPath)
     .then((catalog) => {
       catalogCache.set(key, { value: catalog, expiresAt: Date.now() + CATALOG_TTL_MS });
       return catalog;
@@ -810,7 +1059,7 @@ async function getClassCatalog(authToken, labelConfig, context) {
   return promise;
 }
 
-async function loadClassCatalog(authToken, labelConfig, context) {
+async function loadClassCatalog(authToken, labelConfig, context, classRootPath = '') {
   const aliases = labelConfig.aliases || {};
   const response = await countedCmdbuildRequest(`/cmdbuild/services/rest/v3/classes?limit=${MAX_CLASSES}`, authToken, context);
   if (!response.ok) {
@@ -819,9 +1068,12 @@ async function loadClassCatalog(authToken, labelConfig, context) {
     throw error;
   }
 
-  const rawClasses = extractCmdbData(response.json)
+  const root = normalizeClassRootPath(classRootPath);
+  const listedClasses = extractCmdbData(response.json)
     .filter((item) => item && item.active !== false && (!item.permissions || item.permissions._can_read !== false))
     .slice(0, MAX_CLASSES);
+  const rootClass = root.rootName ? await loadRootClass(authToken, root.rootName, context) : null;
+  const rawClasses = filterClassesByRoot(mergeClassLists(listedClasses, rootClass ? [rootClass] : []), classRootPath);
   const catalog = [];
 
   for (const item of rawClasses) {
@@ -849,6 +1101,7 @@ async function loadClassCatalog(authToken, labelConfig, context) {
 
   logDiagnostic('Basic', 'catalog.loaded', {
     classesScanned: rawClasses.length,
+    classRootPath: normalizeClassRootPath(classRootPath).path,
     searchableClasses: catalog.length
   });
   return catalog;
@@ -856,7 +1109,12 @@ async function loadClassCatalog(authToken, labelConfig, context) {
 
 async function resolveDrafts(drafts, authToken, labelConfig, options = {}) {
   const aliases = labelConfig.aliases || {};
-  const context = { restCalls: 0, lookupTypeCache: new Map(), cmdbuildRequest: options.cmdbuildRequest };
+  const context = {
+    restCalls: 0,
+    lookupTypeCache: new Map(),
+    cmdbuildRequest: options.cmdbuildRequest,
+    classRootPath: options.classRootPath === undefined ? CLASS_ROOT_PATH : options.classRootPath
+  };
   const normalized = Array.isArray(drafts)
     ? drafts.map((draft, index) => normalizeDraftDevice({ row: index + 1, ...draft }, aliases))
     : [];
@@ -1318,8 +1576,21 @@ async function handleApi(req, res, requestUrl) {
   sendJson(res, 404, { ok: false, message: 'Labels API route not found.' });
 }
 
+function readAppVersion(filePath = VERSION_FILE_PATH) {
+  try {
+    const version = fs.readFileSync(filePath, 'utf8').trim();
+    return APP_VERSION_PATTERN.test(version) ? version : APP_VERSION_FALLBACK;
+  } catch (error) {
+    return APP_VERSION_FALLBACK;
+  }
+}
+
+function injectAppVersion(html, version = readAppVersion()) {
+  return String(html).replace(/(<span\s+data-app-version>)[^<]*(<\/span>)/, `$1${version}$2`);
+}
+
 function serveUi(res) {
-  const html = fs.readFileSync(UI_HTML_PATH, 'utf8');
+  const html = injectAppVersion(fs.readFileSync(UI_HTML_PATH, 'utf8'));
   sendHtml(res, 200, html);
 }
 
@@ -1551,14 +1822,19 @@ export {
   API_PREFIX,
   UI_PREFIX,
   createServer,
+  filterClassesByRoot,
+  injectAppVersion,
   isCmdbuildProxyPathAllowed,
   isCmdbuildUiCacheSensitive,
   isJsonContentType,
   isSafeRelativeRequestTarget,
   isSameOriginRequest,
   loggingStatus,
+  normalizeClassRootPath,
   normalizeDiagnosticMode,
   normalizeLogTargets,
+  readinessPayload,
+  readAppVersion,
   readAliasConfigFromEnv,
   renderMetrics,
   resolveDrafts,
