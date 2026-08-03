@@ -31,6 +31,10 @@ test('container healthchecks avoid downloader over cleartext URLs', () => {
   assert.match(dockerfile, /node -e/);
 });
 
+test('container image embeds handoff VERSION source of truth', () => {
+  assert.match(dockerfile, /^\s*COPY\s+VERSION\s+\.\/VERSION\s*$/m);
+});
+
 test('cmdb2label dev nginx rejects host injection and h2c upgrade forwarding', () => {
   assert.match(nginxConfig, /return\s+444;/);
   assert.match(nginxConfig, /proxy_set_header\s+Host\s+localhost:8095;/);

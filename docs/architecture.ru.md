@@ -123,7 +123,7 @@ CMDB_LABELS_ENABLE_CMDBUILD_PROXY=false
 CMDB_LABELS_ALIAS_CONFIG_FILE=/run/config/cmdb2label-aliases.json
 ```
 
-Версия, видимая в правом нижнем углу UI, читается только из root `VERSION` в формате `XX.YY.ZZ.NN`. До первого explicit git handoff файл может отсутствовать; в этом случае UI показывает нейтральный fallback `0.0.0.0`. Версия не вычисляется из `package.json`, branch name или Git metadata.
+Версия, видимая в правом нижнем углу UI, читается только из root `VERSION` в формате `XX.YY.ZZ.NN`. До первого explicit git handoff файл может отсутствовать; в этом случае UI показывает нейтральный fallback `0.0.0.0`. Версия не вычисляется из `package.json`, branch name или Git metadata. Release image assembly обязан включать root `VERSION` в image, чтобы контейнерная сборка из release tag показывала тот же номер, что Git handoff.
 
 `stdout`/`stderr` обязательны всегда. App-level syslog включается опционально через `CMDB_LABELS_LOG_TARGET=stdout,syslog`; при `CMDB_LABELS_LOG_TARGET=stdout` внешний operational sink должен быть обеспечен deployment/platform слоем, например Docker logging driver, sidecar/agent или централизованный collector.
 

@@ -62,6 +62,23 @@ Endpoint проверяет живую CMDBuild session cookie. Без cookie и
 - Если `VERSION` отсутствует до первого explicit git handoff, UI показывает fallback `0.0.0.0`.
 - Не создавайте `VERSION` вручную для локального запуска; файл обновляется в handoff/release workflow вместе с Git tag.
 - Runtime не берет версию из `package.json`, branch name или Git metadata.
+- Docker image должен включать тот же root `VERSION`; иначе контейнер покажет fallback или старую версию.
+
+Рекомендуемая сборка customer image из release tag:
+
+```bash
+git clone ssh://git@github.com/igorlyapin-max/cmdb2label.git
+cd cmdb2label
+git fetch --tags
+git checkout v00.00.00.03
+
+docker build --pull --no-cache \
+  -t ghcr.io/igorlyapin-max/cmdb2label:00.00.00.03 \
+  -t ghcr.io/igorlyapin-max/cmdb2label:latest \
+  .
+```
+
+`latest` допустим для стенда, но для rollback/audit всегда сохраняйте версионный tag.
 
 ## Metrics
 

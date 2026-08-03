@@ -7,6 +7,7 @@ ENV NODE_ENV=production \
     CMDB_LABELS_PORT=8094
 
 COPY package.json ./
+COPY VERSION ./VERSION
 COPY cmdb2label.html ./cmdb2label.html
 COPY src ./src
 COPY scripts ./scripts
