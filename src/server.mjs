@@ -1088,6 +1088,15 @@ async function loadClassCatalog(authToken, labelConfig, context, classRootPath =
       .filter((attribute) => attribute && attribute.active !== false && (!attribute.permissions || attribute.permissions._can_read !== false));
     const fieldMap = buildFieldMap(attributes, aliases);
     const fieldMeta = buildFieldMetadataMap(attributes, aliases);
+    logDiagnostic('Basic', 'catalog.class_mapped', {
+      className,
+      invAttribute: fieldMapAttributeName(fieldMap, 'inv'),
+      modelAttribute: fieldMapAttributeName(fieldMap, 'model'),
+      typeAttribute: fieldMapAttributeName(fieldMap, 'type'),
+      snAttribute: fieldMapAttributeName(fieldMap, 'sn'),
+      modelLookupType: cleanValue(fieldMeta.model && fieldMeta.model.lookupType),
+      hasModelLookupType: Boolean(cleanValue(fieldMeta.model && fieldMeta.model.lookupType))
+    });
     if (!fieldMap.inv && !fieldMap.sn) continue;
     catalog.push({
       name: className,

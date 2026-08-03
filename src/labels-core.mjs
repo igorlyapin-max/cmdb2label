@@ -12,6 +12,9 @@ export const DEFAULT_FIELD_ALIASES = {
     'Инв. номер',
     'Инвентарный номер',
     'Инв номер',
+    'InventoryId',
+    'AssetInventoryNumber',
+    'AssetInventoryNo',
     'Code',
     'code',
     'invnet',
@@ -28,6 +31,7 @@ export const DEFAULT_FIELD_ALIASES = {
     'Тип / Модель',
     'Тип модель',
     'Модель',
+    'ModelName',
     'Model',
     'model',
     'typeModel',
@@ -56,8 +60,71 @@ export const DEFAULT_FIELD_ALIASES = {
     'serialNumber',
     'serialNo',
     'serial_num',
+    'FactorySN',
+    'Заводской номер',
     'серийный'
   ]
+};
+
+export const DEFAULT_ALIAS_PRIORITIES = {
+  inv: {
+    'Инв. номер': 100,
+    'Инвентарный номер': 100,
+    'Инв номер': 95,
+    InventoryId: 95,
+    AssetInventoryNumber: 95,
+    AssetInventoryNo: 95,
+    invnet: 80,
+    inventoryNumber: 80,
+    inventoryNo: 80,
+    invNumber: 80,
+    assetTag: 80,
+    assetNumber: 80,
+    inventory: 70,
+    inv: 60,
+    Code: 10,
+    code: 10
+  },
+  model: {
+    'Модель': 100,
+    ModelName: 95,
+    'Тип/Модель': 90,
+    'Тип / Модель': 90,
+    'Тип модель': 90,
+    model: 80,
+    Model: 80,
+    typeModel: 70,
+    deviceModel: 70
+  },
+  type: {
+    'Тип': 100,
+    ModelGroup: 95,
+    'Группа модели': 90,
+    'Группа': 90,
+    'Производитель': 80,
+    Class: 30,
+    'Класс': 20,
+    class: 20,
+    cls: 20,
+    _type: 20,
+    type: 20,
+    category: 20
+  },
+  sn: {
+    SN: 100,
+    'S/N': 100,
+    'Серийный номер': 100,
+    SerialNumber: 95,
+    serialNumber: 95,
+    FactorySN: 95,
+    'Заводской номер': 90,
+    serialnum: 85,
+    SerialNum: 85,
+    serialNo: 85,
+    serial_num: 85,
+    serial: 80,
+    'серийный': 80
+  }
 };
 
 export const DEFAULT_DERIVED_FIELDS = {
@@ -206,6 +273,37 @@ export function buildAliasLookup(aliases = DEFAULT_FIELD_ALIASES) {
   return lookup;
 }
 
+export function buildAliasPriorityLookup(aliases = DEFAULT_FIELD_ALIASES) {
+  const lookup = {};
+  for (const field of REQUIRED_FIELDS) {
+    const defaults = DEFAULT_FIELD_ALIASES[field] || [];
+    const priorities = DEFAULT_ALIAS_PRIORITIES[field] || {};
+    const aliasesForField = aliases[field] || [];
+    aliasesForField.forEach((alias, index) => {
+      const normalized = normalizeAlias(alias);
+      if (!normalized) return;
+      const isDefault = defaults.some((defaultAlias) => normalizeAlias(defaultAlias) === normalized);
+      const priority = isDefault
+        ? getDefaultAliasPriority(field, alias)
+        : 200 + aliasesForField.length - index;
+      if (!lookup[normalized] || priority > lookup[normalized].priority) {
+        lookup[normalized] = { field, priority };
+      }
+    });
+  }
+  return lookup;
+}
+
+function getDefaultAliasPriority(field, alias) {
+  const priorities = DEFAULT_ALIAS_PRIORITIES[field] || {};
+  if (Object.prototype.hasOwnProperty.call(priorities, alias)) return priorities[alias];
+  const normalized = normalizeAlias(alias);
+  for (const [name, priority] of Object.entries(priorities)) {
+    if (normalizeAlias(name) === normalized) return priority;
+  }
+  return 50;
+}
+
 export function parseManualAttributes(text) {
   const lines = String(text || '')
     .split(/\r?\n/)
@@ -274,29 +372,32 @@ export function buildFieldMap(attributes = [], aliases = DEFAULT_FIELD_ALIASES) 
 }
 
 export function buildFieldMetadataMap(attributes = [], aliases = DEFAULT_FIELD_ALIASES) {
-  const aliasLookup = buildAliasLookup(aliases);
+  const aliasLookup = buildAliasPriorityLookup(aliases);
   const result = {};
+  const scores = {};
 
   for (const attribute of attributes) {
     const attrName = attribute && (attribute.name || attribute.code);
-    const names = [
-      attrName,
-      attribute && attribute.code,
-      attribute && attribute.description,
-      attribute && attribute._description
+    const candidates = [
+      { name: attrName, weight: 100 },
+      { name: attribute && attribute.code, weight: 100 },
+      { name: attribute && attribute.description, weight: 0 },
+      { name: attribute && attribute._description, weight: 0 }
     ];
 
-    for (const name of names) {
-      const field = aliasLookup[normalizeAlias(name)];
-      if (field && !result[field]) {
+    for (const candidate of candidates) {
+      const match = aliasLookup[normalizeAlias(candidate.name)];
+      if (match && (!result[match.field] || match.priority + candidate.weight > scores[match.field])) {
+        const field = match.field;
         result[field] = {
-          name: attrName || name,
+          name: attrName || candidate.name,
           code: attribute && attribute.code,
           description: attribute && (attribute.description || attribute._description || ''),
           type: attribute && attribute.type,
           lookupType: attribute && (attribute.lookupType || attribute.lookup_type || attribute._lookupType),
           raw: attribute
         };
+        scores[field] = match.priority + candidate.weight;
       }
     }
   }

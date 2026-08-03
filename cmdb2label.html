@@ -297,22 +297,26 @@ const FIELD_LABELS = {
 };
 const DELIMITERS = { semicolon: ';', comma: ',', tab: '\t' };
 const HEADER_ALIASES = {
-    inv: ['Инв. номер', 'Инвентарный номер', 'Инв номер', 'Code', 'code', 'invnet', 'inv', 'inventory', 'inventoryNumber', 'inventoryNo', 'assetTag', 'assetNumber'],
-    model: ['Тип/Модель', 'Тип / Модель', 'Тип модель', 'Модель', 'Model', 'model', 'typeModel', 'deviceModel'],
+    inv: ['Инв. номер', 'Инвентарный номер', 'Инв номер', 'InventoryId', 'AssetInventoryNumber', 'AssetInventoryNo', 'Code', 'code', 'invnet', 'inv', 'inventory', 'inventoryNumber', 'inventoryNo', 'assetTag', 'assetNumber'],
+    model: ['Тип/Модель', 'Тип / Модель', 'Тип модель', 'Модель', 'ModelName', 'Model', 'model', 'typeModel', 'deviceModel'],
     type: ['Тип', 'Группа модели', 'Группа', 'Производитель', 'Класс', 'class', 'cls', 'type', 'category', '_type'],
-    sn: ['SN', 'S/N', 'Серийный номер', 'serial', 'serialnum', 'SerialNum', 'serialNumber', 'serialNo', 'serial_num', 'серийный']
+    sn: ['SN', 'S/N', 'Серийный номер', 'serial', 'serialnum', 'SerialNum', 'serialNumber', 'serialNo', 'serial_num', 'FactorySN', 'Заводской номер', 'серийный']
 };
 const HEADER_ALIAS_PRIORITY = {
     inv: {
         'Инв. номер': 100,
-        'Инвентарный номер': 95,
+        'Инвентарный номер': 100,
         'Инв номер': 95,
+        InventoryId: 95,
+        AssetInventoryNumber: 95,
+        AssetInventoryNo: 95,
         invnet: 80,
         Code: 10,
         code: 10
     },
     model: {
         'Модель': 100,
+        ModelName: 95,
         'Тип/Модель': 90,
         'Тип / Модель': 90,
         'Тип модель': 90
@@ -322,7 +326,11 @@ const HEADER_ALIAS_PRIORITY = {
         'S/N': 100,
         serialnum: 95,
         SerialNum: 95,
-        'Серийный номер': 95
+        SerialNumber: 95,
+        serialNumber: 95,
+        FactorySN: 95,
+        'Серийный номер': 95,
+        'Заводской номер': 90
     },
     type: {
         'Тип': 100,

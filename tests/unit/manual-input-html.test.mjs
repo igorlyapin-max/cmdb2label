@@ -159,6 +159,27 @@ test('CSV headers prefer explicit inventory number over technical Code alias', (
   assert.equal(parsed.device.type, 'HP');
 });
 
+test('CSV headers accept customer aliases used by backend config examples', () => {
+  const headerResult = helpers.mapCsvHeaders(['Code', 'InventoryId', 'ModelName', 'FactorySN', 'Заводской номер']);
+  assert.equal(headerResult.errors.length, 0);
+  assert.equal(headerResult.mapping.inv, 1);
+  assert.equal(headerResult.mapping.model, 2);
+  assert.equal(headerResult.mapping.sn, 3);
+
+  const parsed = helpers.validateCsvRow([
+    'TECH-CODE',
+    '7700010000160724',
+    'HPE Aruba IAP-207',
+    'CNDDJSTGFT',
+    'NDDJSTGFT'
+  ], headerResult.mapping, 2);
+
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.device.inv, '7700010000160724');
+  assert.equal(parsed.device.model, 'HPE Aruba IAP-207');
+  assert.equal(parsed.device.sn, 'CNDDJSTGFT');
+});
+
 test('CSV headers split CMDB hierarchical type/model display', () => {
   const headerResult = helpers.mapCsvHeaders(['Инвентарный номер', 'Тип / Модель', 'Серийный номер']);
   const parsed = helpers.validateCsvRow([

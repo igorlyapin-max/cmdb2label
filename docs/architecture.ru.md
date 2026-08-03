@@ -132,10 +132,10 @@ CMDB_LABELS_ALIAS_CONFIG_FILE=/run/config/cmdb2label-aliases.json
 ```json
 {
   "aliases": {
-    "inv": ["Code", "invnet"],
-    "model": ["Модель", "model"],
+    "inv": ["InventoryId", "AssetInventoryNumber", "Инвентарный номер"],
+    "model": ["ModelName", "Модель", "model"],
     "type": ["Тип", "Группа модели", "Производитель"],
-    "sn": ["serialnum", "SerialNumber"]
+    "sn": ["serialnum", "SerialNumber", "FactorySN", "Заводской номер"]
   },
   "derivedFields": {
     "typeFromModelLookupParent": {
@@ -150,6 +150,8 @@ CMDB_LABELS_ALIAS_CONFIG_FILE=/run/config/cmdb2label-aliases.json
 ```
 
 Config validation выполняется на старте и в readiness path. Некорректный JSON, нечитаемый файл, alias entry не массивом или `derivedFields.typeFromModelLookupParent.typeField` не равный `"type"` считаются ошибкой конфигурации. Legacy keys `aliases.cls`, `derivedFields.groupFromLookupParent`, `sourceField` и `targetField` принимаются только как migration path и дают warning.
+
+Backend выбирает CMDBuild attributes по alias priority, а не по порядку `/attributes`. Business aliases инвентарного номера (`Инвентарный номер`, `InventoryId`, `AssetInventoryNumber`) приоритетнее технического `Code`; `Code` используется только как fallback, когда другого совпадения нет.
 
 Lookup derivation читает parent lookup модели. Если CMDBuild metadata атрибута модели отдает `lookupType`, `sourceLookupType` можно не задавать. Если parent id приходит как scalar `parent`, задайте `parentLookupType`, чтобы backend резолвил тип по lookup values.
 

@@ -93,6 +93,24 @@ const fixtures = {
       { name: 'serialnum', description: 'Серийный номер', type: 'string' },
       { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta' }
     ]
+  },
+  CustomerInventoryAsset: {
+    serial: 'CNDDJSTGFT',
+    inventory: '7700010000160724',
+    card: {
+      _id: 7,
+      Code: 'TECH-CODE-CUSTOMER-ASSET',
+      InventoryId: '7700010000160724',
+      SerialNumber: 'CNDDJSTGFT',
+      ModelName: 101,
+      _ModelName_description: 'HPE Aruba IAP-207'
+    },
+    attributes: [
+      { name: 'Code', description: 'Code', type: 'string' },
+      { name: 'InventoryId', description: 'Инвентарный номер', type: 'string' },
+      { name: 'SerialNumber', description: 'Серийный номер', type: 'string' },
+      { name: 'ModelName', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta' }
+    ]
   }
 };
 
@@ -204,6 +222,35 @@ test('resolveDrafts resolves scalar lookup parent id through configured parent t
   assert.equal(result.ok, true);
   assert.equal(result.devices[0].model, 'Scalar 5555');
   assert.equal(result.devices[0].type, 'Workstation');
+});
+
+test('resolveDrafts enriches CSV row with only customer inventory number', async () => {
+  const result = await resolveDrafts([{ inv: '7700010000160724' }], 'auth-customer-inv', mergeLabelConfig(), {
+    classRootPath: '',
+    cmdbuildRequest: fakeCmdbuildRequest
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0].inv, '7700010000160724');
+  assert.equal(result.devices[0].sn, 'CNDDJSTGFT');
+  assert.equal(result.devices[0].model, 'HPE Aruba IAP-207');
+  assert.equal(result.devices[0].type, 'Printer');
+});
+
+test('resolveDrafts preserves entered inventory and serial while enriching model and type', async () => {
+  const result = await resolveDrafts([{
+    inv: '7700010000160724',
+    sn: 'CNDDJSTGFT'
+  }], 'auth-customer-inv-sn', mergeLabelConfig(), {
+    classRootPath: '',
+    cmdbuildRequest: fakeCmdbuildRequest
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0].inv, '7700010000160724');
+  assert.equal(result.devices[0].sn, 'CNDDJSTGFT');
+  assert.equal(result.devices[0].model, 'HPE Aruba IAP-207');
+  assert.equal(result.devices[0].type, 'Printer');
 });
 
 test('filterClassesByRoot keeps root and descendant classes only', () => {
@@ -372,8 +419,13 @@ async function fakeCmdbuildRequestWithCalls(pathname) {
   if (cardsMatch) {
     const fixture = fixtures[cardsMatch[1]];
     const filter = requestUrl.searchParams.get('filter') || '';
-    const matchesSerial = fixture && filter.includes(fixture.serial);
-    return ok({ data: matchesSerial ? [fixture.card] : [] });
+    const parsedFilter = filter ? JSON.parse(filter) : null;
+    const searchedAttribute = parsedFilter && parsedFilter.attribute && parsedFilter.attribute.simple && parsedFilter.attribute.simple.attribute;
+    const searchedValues = parsedFilter && parsedFilter.attribute && parsedFilter.attribute.simple && parsedFilter.attribute.simple.value;
+    const searchedValue = Array.isArray(searchedValues) ? searchedValues[0] : '';
+    const matchesSerial = fixture && searchedAttribute && searchedValue === fixture.serial && ['serialnum', 'SerialNumber'].includes(searchedAttribute);
+    const matchesInventory = fixture && fixture.inventory && searchedValue === fixture.inventory && searchedAttribute === 'InventoryId';
+    return ok({ data: matchesSerial || matchesInventory ? [fixture.card] : [] });
   }
 
   const lookupMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/lookup_types\/([^/]+)\/values$/);

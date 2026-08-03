@@ -78,10 +78,10 @@ curl -fsS http://127.0.0.1:8094/metrics
 ```json
 {
   "aliases": {
-    "inv": ["InventoryId", "AssetInventoryNumber", "Code"],
-    "model": ["ModelName", "Модель"],
+    "inv": ["InventoryId", "AssetInventoryNumber", "Инвентарный номер"],
+    "model": ["ModelName", "Модель", "Тип/Модель"],
     "type": ["Тип", "ModelGroup", "Группа модели"],
-    "sn": ["SerialNumber", "FactorySN", "serialnum"]
+    "sn": ["SerialNumber", "FactorySN", "serialnum", "Заводской номер"]
   },
   "derivedFields": {
     "typeFromModelLookupParent": {
@@ -96,6 +96,8 @@ curl -fsS http://127.0.0.1:8094/metrics
 ```
 
 По умолчанию `type` на этикетке означает `Тип`: backend берет CMDBuild-атрибут, mapped как `model`, читает его lookup value и выводит parent lookup. Если в конкретной модели CMDBuild это поле заполняется вручную из CSV, можно оставить alias для `type`; если нужно отключить derive, задайте `"enabled": false`.
+
+`Code` остается fallback-алиасом для `inv`, но business aliases имеют приоритет. Если у заказчика есть отдельный атрибут инвентарного номера, добавьте его в `aliases.inv`; не используйте `Code` как единственный inventory alias, если это технический код карточки.
 
 При copy/paste из UI CMDBuild поле `Тип / Модель` считается display path и разбирается до REST-дозапроса: значение вида `ТД WiFi / HPE Aruba IAP-207` дает `type = "ТД WiFi"` и `model = "HPE Aruba IAP-207"`. Явное поле `Тип` имеет приоритет. Обычное поле `Модель` со slash, например `HP / HP 1111`, не разбирается как display path.
 
@@ -211,6 +213,7 @@ curl -i http://<host>/cmdbuild/custom-api/labels/session
 
 - права текущего пользователя на классы и атрибуты оборудования;
 - что в модели есть атрибуты, совпадающие с aliases для `inv` или `sn`;
+- что `aliases.inv` указывает на бизнес-атрибут инвентарного номера, а не только на технический `Code`;
 - что атрибут модели совпадает с aliases для `model` и является lookup с parent lookup, если нужно автоматически заполнить `Тип`;
 - `sourceLookupType` и `parentLookupType` в `/etc/cmdb2label/aliases.json`, если CMDBuild не отдает lookup metadata или parent lookup type;
 - `CMDB_LABELS_ALIAS_CONFIG_FILE`, если коды атрибутов нестандартные;

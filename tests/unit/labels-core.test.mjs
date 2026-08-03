@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   buildCmdbEqualFilter,
+  buildAliasPriorityLookup,
   buildFieldMap,
   buildFieldMetadataMap,
   cleanValue,
@@ -202,6 +203,59 @@ test('buildFieldMap matches attribute names and descriptions', () => {
   assert.equal(map.inv, 'InventoryId');
   assert.equal(map.sn, 'SerialNumber');
   assert.equal(map.model, 'ModelName');
+});
+
+test('buildFieldMap prefers business inventory aliases over technical Code regardless of attribute order', () => {
+  const aliases = mergeAliasConfig();
+  const map = buildFieldMap([
+    { name: 'Code', description: 'Code' },
+    { name: 'InventoryId', description: 'Инвентарный номер' },
+    { name: 'serialnum', description: 'Серийный номер' },
+    { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'Model' }
+  ], aliases);
+
+  assert.equal(map.inv, 'InventoryId');
+  assert.equal(map.sn, 'serialnum');
+  assert.equal(map.model, 'model');
+});
+
+test('buildFieldMap prefers business inventory attribute name over technical Code description', () => {
+  const aliases = mergeAliasConfig();
+  const map = buildFieldMap([
+    { name: 'Code', description: 'Инвентарный номер' },
+    { name: 'InventoryId', description: 'Inventory id' }
+  ], aliases);
+
+  assert.equal(map.inv, 'InventoryId');
+});
+
+test('configured aliases have priority over default Code fallback in CMDBuild field mapping', () => {
+  const aliases = mergeAliasConfig({ aliases: { inv: ['CustomerInventory'] } });
+  const map = buildFieldMap([
+    { name: 'Code', description: 'Code' },
+    { name: 'CustomerInventory', description: 'Customer inventory number' }
+  ], aliases);
+
+  assert.equal(map.inv, 'CustomerInventory');
+});
+
+test('configured inventory alias has priority over technical Code business description', () => {
+  const aliases = mergeAliasConfig({ aliases: { inv: ['CustomerInventory'] } });
+  const map = buildFieldMap([
+    { name: 'Code', description: 'Инвентарный номер' },
+    { name: 'CustomerInventory', description: 'Customer inventory number' }
+  ], aliases);
+
+  assert.equal(map.inv, 'CustomerInventory');
+});
+
+test('alias priority lookup keeps Code as low-priority inventory fallback', () => {
+  const priority = buildAliasPriorityLookup(mergeAliasConfig()).code;
+  const inventory = buildAliasPriorityLookup(mergeAliasConfig()).inventoryid;
+
+  assert.equal(priority.field, 'inv');
+  assert.equal(inventory.field, 'inv');
+  assert.ok(inventory.priority > priority.priority);
 });
 
 test('buildFieldMetadataMap keeps lookup metadata for model attributes', () => {
