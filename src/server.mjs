@@ -62,6 +62,7 @@ const API_PREFIX = '/cmdbuild/custom-api/labels';
 const ROOT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
 const UI_HTML_PATH = process.env.CMDB_LABELS_UI_HTML || path.join(ROOT_DIR, 'cmdb2label.html');
 const VERSION_FILE_PATH = path.join(ROOT_DIR, 'VERSION');
+const BUILD_IDENTITY_FILE_PATH = path.join(ROOT_DIR, 'build-identity.json');
 const APP_VERSION_FALLBACK = '0.0.0.0';
 const APP_VERSION_PATTERN = /^\d{2}\.\d{2}\.\d{2}\.\d{2}$/;
 const BUILD_REVISION_PATTERN = /^[0-9a-f]{40}$|^unknown$/;
@@ -861,14 +862,32 @@ function readBuildRevision(env = process.env) {
   return BUILD_REVISION_PATTERN.test(revision) ? revision : 'unknown';
 }
 
-function readBuildSourceState(env = process.env) {
-  const state = cleanValue(env.CMDB_LABELS_BUILD_SOURCE_STATE || 'unverified-local');
+function normalizeBuildSourceState(state) {
+  state = cleanValue(state || 'unverified-local');
   return state === 'verified' || state === 'clean' ? 'verified' : 'unverified-local';
+}
+
+function readBuildSourceState(env = process.env) {
+  return normalizeBuildSourceState(env.CMDB_LABELS_BUILD_SOURCE_STATE);
+}
+
+function normalizeBuildMode(mode) {
+  return cleanValue(mode) === 'canonical' ? 'canonical' : 'manual';
 }
 
 function readRuntimeArtifactSha256(env = process.env) {
   const hash = cleanValue(env.CMDB_LABELS_RUNTIME_ARTIFACT_SHA256 || 'unknown').toLowerCase();
   return SHA256_PATTERN.test(hash) ? hash : 'unknown';
+}
+
+function readBuildIdentityFile(filePath = BUILD_IDENTITY_FILE_PATH) {
+  try {
+    const data = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    if (!data || typeof data !== 'object') return {};
+    return data;
+  } catch (error) {
+    return {};
+  }
 }
 
 function sha256File(filePath) {
@@ -881,18 +900,31 @@ function sha256File(filePath) {
 
 function buildIdentityPayload(env = process.env, options = {}) {
   const runtimeArtifactPath = options.runtimeArtifactPath || UI_HTML_PATH;
+  const embedded = readBuildIdentityFile(options.buildIdentityFilePath || BUILD_IDENTITY_FILE_PATH);
   const runtimeArtifactSha256 = sha256File(runtimeArtifactPath);
-  const expectedRuntimeArtifactSha256 = readRuntimeArtifactSha256(env);
+  const embeddedArtifact = embedded && embedded.runtimeArtifact && typeof embedded.runtimeArtifact === 'object' ?
+    embedded.runtimeArtifact :
+    {};
+  const expectedRuntimeArtifactSha256 = readRuntimeArtifactSha256(env) !== 'unknown' ?
+    readRuntimeArtifactSha256(env) :
+    cleanValue(embeddedArtifact.expectedSha256 || embeddedArtifact.sha256 || 'unknown').toLowerCase();
   const version = readAppVersion(options.versionFilePath || VERSION_FILE_PATH);
   const buildVersion = APP_VERSION_PATTERN.test(cleanValue(env.CMDB_LABELS_BUILD_VERSION || '')) ?
     cleanValue(env.CMDB_LABELS_BUILD_VERSION) :
-    version;
+    (APP_VERSION_PATTERN.test(cleanValue(embedded.buildVersion || '')) ? cleanValue(embedded.buildVersion) : version);
+  const revision = readBuildRevision(env) !== 'unknown' ?
+    readBuildRevision(env) :
+    (BUILD_REVISION_PATTERN.test(cleanValue(embedded.revision || '').toLowerCase()) ? cleanValue(embedded.revision).toLowerCase() : 'unknown');
+  const sourceState = readBuildSourceState(env) === 'verified' ?
+    'verified' :
+    normalizeBuildSourceState(embedded.sourceState);
 
   return {
     version,
     buildVersion,
-    revision: readBuildRevision(env),
-    sourceState: readBuildSourceState(env),
+    revision,
+    sourceState,
+    buildMode: normalizeBuildMode(env.CMDB_LABELS_BUILD_MODE || embedded.buildMode),
     runtimeArtifact: {
       path: path.basename(runtimeArtifactPath),
       sha256: runtimeArtifactSha256,

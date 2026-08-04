@@ -242,6 +242,7 @@ test('build identity exposes version, revision, source state, and runtime artifa
     assert.equal(identity.buildVersion, '00.00.00.09');
     assert.equal(identity.revision, '1234567890abcdef1234567890abcdef12345678');
     assert.equal(identity.sourceState, 'verified');
+    assert.equal(identity.buildMode, 'manual');
     assert.equal(identity.runtimeArtifact.sha256, hash);
     assert.equal(identity.runtimeArtifact.matchesExpected, true);
   } finally {
@@ -260,8 +261,51 @@ test('build identity treats missing or invalid provenance as unverified local', 
 
   assert.equal(identity.revision, 'unknown');
   assert.equal(identity.sourceState, 'unverified-local');
+  assert.equal(identity.buildMode, 'manual');
   assert.equal(identity.runtimeArtifact.expectedSha256, 'unknown');
   assert.equal(identity.runtimeArtifact.matchesExpected, false);
+});
+
+test('build identity reads embedded image provenance when env is not supplied', () => {
+  const versionPath = path.join(os.tmpdir(), `cmdb2label-embedded-version-${process.pid}`);
+  const artifactPath = path.join(os.tmpdir(), `cmdb2label-embedded-ui-${process.pid}.html`);
+  const identityPath = path.join(os.tmpdir(), `cmdb2label-embedded-identity-${process.pid}.json`);
+  fs.writeFileSync(versionPath, '00.00.00.10\n');
+  fs.writeFileSync(artifactPath, '<html>manual image</html>');
+  const hash = cryptoHashFile(artifactPath);
+  fs.writeFileSync(identityPath, JSON.stringify({
+    version: '00.00.00.10',
+    buildVersion: '00.00.00.10',
+    revision: 'unknown',
+    sourceState: 'unverified-local',
+    buildMode: 'manual',
+    runtimeArtifact: {
+      path: 'cmdb2label.html',
+      sha256: hash,
+      expectedSha256: hash,
+      matchesExpected: true
+    }
+  }));
+
+  try {
+    const identity = buildIdentityPayload({}, {
+      versionFilePath: versionPath,
+      runtimeArtifactPath: artifactPath,
+      buildIdentityFilePath: identityPath
+    });
+
+    assert.equal(identity.version, '00.00.00.10');
+    assert.equal(identity.buildVersion, '00.00.00.10');
+    assert.equal(identity.revision, 'unknown');
+    assert.equal(identity.sourceState, 'unverified-local');
+    assert.equal(identity.buildMode, 'manual');
+    assert.equal(identity.runtimeArtifact.expectedSha256, hash);
+    assert.equal(identity.runtimeArtifact.matchesExpected, true);
+  } finally {
+    fs.rmSync(versionPath, { force: true });
+    fs.rmSync(artifactPath, { force: true });
+    fs.rmSync(identityPath, { force: true });
+  }
 });
 
 function cryptoHashFile(filePath) {

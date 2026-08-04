@@ -66,33 +66,56 @@ Endpoint проверяет живую CMDBuild session cookie. Без cookie и
 - Не создавайте `VERSION` вручную для локального запуска; файл обновляется в handoff/release workflow вместе с Git tag.
 - Runtime не берет версию из `package.json`, branch name или Git metadata.
 - Docker image должен включать тот же root `VERSION`; иначе контейнер покажет fallback или старую версию.
-- Raw `docker build` считается `unverified-local`. Для customer delivery используйте canonical helper, который проверяет tracked clean source, OCI labels, `/app/VERSION` и SHA256 `cmdb2label.html`.
+- Plain `docker build` поддержан для ручной customer source build и всегда считается `unverified-local`. Он не требует `npm`, Git metadata или build args на build host, но генерирует `/app/build-identity.json` из переданного Docker build context.
+- Для verified customer delivery используйте canonical helper, который проверяет tracked clean source, OCI labels, `/app/VERSION` и SHA256 `cmdb2label.html`.
 
-Рекомендуемая сборка customer image из release tag:
+Ручная сборка customer image из release tag:
 
 ```bash
 git clone ssh://git@github.com/igorlyapin-max/cmdb2label.git
 cd cmdb2label
 git fetch --tags
-git checkout v00.00.00.04
+git checkout v00.00.00.05
 
+docker build --pull --no-cache \
+  -t ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05-local \
+  .
+```
+
+Проверка manual image:
+
+```bash
+docker run --rm ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05-local cat /app/VERSION
+docker run -d --rm --name cmdb2label-manual-smoke \
+  -p 127.0.0.1:18095:8094 \
+  -e CMDB_LABELS_CSRF_SECRET=replace-with-stable-secret \
+  ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05-local
+curl -fsS http://127.0.0.1:18095/about
+docker stop cmdb2label-manual-smoke
+```
+
+Для manual image `identity.sourceState` должен быть `unverified-local`, `identity.buildMode` должен быть `manual`, а `identity.runtimeArtifact.matchesExpected` должен быть `true`. Это runnable image для локальной/customer проверки, но не verified release artifact.
+
+Verified сборка release image:
+
+```bash
 npm run build:image -- \
   --verified \
-  --tag ghcr.io/igorlyapin-max/cmdb2label:00.00.00.04 \
+  --tag ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05 \
   --tag ghcr.io/igorlyapin-max/cmdb2label:latest
 ```
 
-`latest` допустим для стенда, но для rollback/audit всегда сохраняйте версионный tag.
+`latest` допустим для стенда, но для rollback/audit всегда сохраняйте версионный tag. Runtime compose для customer delivery должен ссылаться на prebuilt `image:`, а не использовать `build:`.
 
 Проверка identity после запуска контейнера:
 
 ```bash
 curl -fsS http://127.0.0.1:8094/about
-docker image inspect ghcr.io/igorlyapin-max/cmdb2label:00.00.00.04 \
+docker image inspect ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05 \
   --format '{{json .Config.Labels}}'
 ```
 
-Для delivery image `identity.sourceState` должен быть `verified`, `identity.revision` должен совпадать с release commit, а `identity.runtimeArtifact.matchesExpected` должен быть `true`. `--no-cache` сам по себе не доказывает свежесть source и не заменяет identity check.
+Для verified delivery image `identity.sourceState` должен быть `verified`, `identity.buildMode` должен быть `canonical`, `identity.revision` должен совпадать с release commit, а `identity.runtimeArtifact.matchesExpected` должен быть `true`. `--no-cache` сам по себе не доказывает свежесть source и не заменяет identity check.
 
 ## Metrics
 

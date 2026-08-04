@@ -40,10 +40,14 @@ test('container image declares build provenance args and OCI labels', () => {
   assert.match(dockerfile, /^\s*ARG\s+CMDB_LABELS_BUILD_REVISION=/m);
   assert.match(dockerfile, /^\s*ARG\s+CMDB_LABELS_BUILD_SOURCE_STATE=/m);
   assert.match(dockerfile, /^\s*ARG\s+CMDB_LABELS_RUNTIME_ARTIFACT_SHA256=/m);
+  assert.match(dockerfile, /^\s*ARG\s+CMDB_LABELS_BUILD_MODE=manual/m);
   assert.match(dockerfile, /org\.opencontainers\.image\.version="\$\{CMDB_LABELS_BUILD_VERSION\}"/);
   assert.match(dockerfile, /org\.opencontainers\.image\.revision="\$\{CMDB_LABELS_BUILD_REVISION\}"/);
   assert.match(dockerfile, /org\.opencontainers\.image\.source-state="\$\{CMDB_LABELS_BUILD_SOURCE_STATE\}"/);
   assert.match(dockerfile, /org\.opencontainers\.image\.runtime-artifact-sha256="\$\{CMDB_LABELS_RUNTIME_ARTIFACT_SHA256\}"/);
+  assert.match(dockerfile, /org\.opencontainers\.image\.build-mode="\$\{CMDB_LABELS_BUILD_MODE\}"/);
+  assert.match(dockerfile, /build-identity\.json/);
+  assert.match(dockerfile, /verified image provenance does not match build context/);
 });
 
 test('cmdb2label dev nginx rejects host injection and h2c upgrade forwarding', () => {

@@ -46,6 +46,7 @@ const dockerArgs = [
   '--build-arg', `CMDB_LABELS_BUILD_REVISION=${revision}`,
   '--build-arg', `CMDB_LABELS_BUILD_SOURCE_STATE=${sourceState}`,
   '--build-arg', `CMDB_LABELS_RUNTIME_ARTIFACT_SHA256=${artifactSha256}`,
+  '--build-arg', 'CMDB_LABELS_BUILD_MODE=canonical',
   ...tags.flatMap((tag) => ['-t', tag]),
   '.'
 ];
@@ -65,6 +66,7 @@ assertEqual(labels['org.opencontainers.image.version'], version, 'OCI version la
 assertEqual(labels['org.opencontainers.image.revision'], revision, 'OCI revision label');
 assertEqual(labels['org.opencontainers.image.source-state'], sourceState, 'OCI source-state label');
 assertEqual(labels['org.opencontainers.image.runtime-artifact-sha256'], artifactSha256, 'OCI runtime artifact label');
+assertEqual(labels['org.opencontainers.image.build-mode'], 'canonical', 'OCI build-mode label');
 
 const imageVersion = run('docker', ['run', '--rm', primaryTag, 'cat', '/app/VERSION'], { capture: true }).trim();
 assertEqual(imageVersion, version, 'image /app/VERSION');
