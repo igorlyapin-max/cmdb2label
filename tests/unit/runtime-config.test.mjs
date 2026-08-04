@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import {
+  buildIdentityPayload,
   injectAppVersion,
   normalizeClassRootPath,
   normalizeLogTargets,
@@ -217,3 +219,51 @@ test('app version reads handoff VERSION format and injects it into UI html', () 
     fs.rmSync(versionPath, { force: true });
   }
 });
+
+test('build identity exposes version, revision, source state, and runtime artifact checksum', () => {
+  const versionPath = path.join(os.tmpdir(), `cmdb2label-identity-version-${process.pid}`);
+  const artifactPath = path.join(os.tmpdir(), `cmdb2label-identity-ui-${process.pid}.html`);
+  fs.writeFileSync(versionPath, '00.00.00.09\n');
+  fs.writeFileSync(artifactPath, '<html>label ui</html>');
+  const hash = cryptoHashFile(artifactPath);
+
+  try {
+    const identity = buildIdentityPayload({
+      CMDB_LABELS_BUILD_VERSION: '00.00.00.09',
+      CMDB_LABELS_BUILD_REVISION: '1234567890abcdef1234567890abcdef12345678',
+      CMDB_LABELS_BUILD_SOURCE_STATE: 'verified',
+      CMDB_LABELS_RUNTIME_ARTIFACT_SHA256: hash
+    }, {
+      versionFilePath: versionPath,
+      runtimeArtifactPath: artifactPath
+    });
+
+    assert.equal(identity.version, '00.00.00.09');
+    assert.equal(identity.buildVersion, '00.00.00.09');
+    assert.equal(identity.revision, '1234567890abcdef1234567890abcdef12345678');
+    assert.equal(identity.sourceState, 'verified');
+    assert.equal(identity.runtimeArtifact.sha256, hash);
+    assert.equal(identity.runtimeArtifact.matchesExpected, true);
+  } finally {
+    fs.rmSync(versionPath, { force: true });
+    fs.rmSync(artifactPath, { force: true });
+  }
+});
+
+test('build identity treats missing or invalid provenance as unverified local', () => {
+  const identity = buildIdentityPayload({
+    CMDB_LABELS_BUILD_VERSION: 'bad',
+    CMDB_LABELS_BUILD_REVISION: 'dirty',
+    CMDB_LABELS_BUILD_SOURCE_STATE: 'dirty',
+    CMDB_LABELS_RUNTIME_ARTIFACT_SHA256: 'bad'
+  });
+
+  assert.equal(identity.revision, 'unknown');
+  assert.equal(identity.sourceState, 'unverified-local');
+  assert.equal(identity.runtimeArtifact.expectedSha256, 'unknown');
+  assert.equal(identity.runtimeArtifact.matchesExpected, false);
+});
+
+function cryptoHashFile(filePath) {
+  return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+}

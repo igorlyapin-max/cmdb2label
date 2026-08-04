@@ -64,6 +64,8 @@ const UI_HTML_PATH = process.env.CMDB_LABELS_UI_HTML || path.join(ROOT_DIR, 'cmd
 const VERSION_FILE_PATH = path.join(ROOT_DIR, 'VERSION');
 const APP_VERSION_FALLBACK = '0.0.0.0';
 const APP_VERSION_PATTERN = /^\d{2}\.\d{2}\.\d{2}\.\d{2}$/;
+const BUILD_REVISION_PATTERN = /^[0-9a-f]{40}$|^unknown$/;
+const SHA256_PATTERN = /^[0-9a-f]{64}$|^unknown$/;
 const DEV_CACHE_BUSTER = String(Date.now());
 const REQUEST_TIMEOUT_MS = readRuntimeInteger('CMDB_LABELS_REQUEST_TIMEOUT_MS', 10000, 500, 300000);
 const HEALTH_TIMEOUT_MS = readRuntimeInteger('CMDB_LABELS_HEALTH_TIMEOUT_MS', 2000, 300, 60000);
@@ -848,8 +850,55 @@ function baseHealthPayload() {
   return {
     service: SERVICE,
     live: true,
+    identity: buildIdentityPayload(),
     startedAt: STARTED_AT.toISOString(),
     uptimeSec: Math.round(process.uptime())
+  };
+}
+
+function readBuildRevision(env = process.env) {
+  const revision = cleanValue(env.CMDB_LABELS_BUILD_REVISION || 'unknown').toLowerCase();
+  return BUILD_REVISION_PATTERN.test(revision) ? revision : 'unknown';
+}
+
+function readBuildSourceState(env = process.env) {
+  const state = cleanValue(env.CMDB_LABELS_BUILD_SOURCE_STATE || 'unverified-local');
+  return state === 'verified' || state === 'clean' ? 'verified' : 'unverified-local';
+}
+
+function readRuntimeArtifactSha256(env = process.env) {
+  const hash = cleanValue(env.CMDB_LABELS_RUNTIME_ARTIFACT_SHA256 || 'unknown').toLowerCase();
+  return SHA256_PATTERN.test(hash) ? hash : 'unknown';
+}
+
+function sha256File(filePath) {
+  try {
+    return crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex');
+  } catch (error) {
+    return 'unknown';
+  }
+}
+
+function buildIdentityPayload(env = process.env, options = {}) {
+  const runtimeArtifactPath = options.runtimeArtifactPath || UI_HTML_PATH;
+  const runtimeArtifactSha256 = sha256File(runtimeArtifactPath);
+  const expectedRuntimeArtifactSha256 = readRuntimeArtifactSha256(env);
+  const version = readAppVersion(options.versionFilePath || VERSION_FILE_PATH);
+  const buildVersion = APP_VERSION_PATTERN.test(cleanValue(env.CMDB_LABELS_BUILD_VERSION || '')) ?
+    cleanValue(env.CMDB_LABELS_BUILD_VERSION) :
+    version;
+
+  return {
+    version,
+    buildVersion,
+    revision: readBuildRevision(env),
+    sourceState: readBuildSourceState(env),
+    runtimeArtifact: {
+      path: path.basename(runtimeArtifactPath),
+      sha256: runtimeArtifactSha256,
+      expectedSha256: expectedRuntimeArtifactSha256,
+      matchesExpected: expectedRuntimeArtifactSha256 !== 'unknown' && runtimeArtifactSha256 === expectedRuntimeArtifactSha256
+    }
   };
 }
 
@@ -1582,6 +1631,10 @@ async function handleApi(req, res, requestUrl) {
     await handleHealth(req, res, requestUrl);
     return;
   }
+  if (requestUrl.pathname === `${API_PREFIX}/about` && req.method === 'GET') {
+    sendJson(res, 200, { service: SERVICE, identity: buildIdentityPayload() });
+    return;
+  }
   sendJson(res, 404, { ok: false, message: 'Labels API route not found.' });
 }
 
@@ -1742,6 +1795,10 @@ function createServer() {
       sendText(res, 200, renderMetrics(), 'text/plain; version=0.0.4; charset=utf-8');
       return;
     }
+    if (requestUrl.pathname === '/about') {
+      sendJson(res, 200, { service: SERVICE, identity: buildIdentityPayload() });
+      return;
+    }
     if (requestUrl.pathname === '/health/live' || requestUrl.pathname === '/health/ready') {
       handleHealth(req, res, requestUrl).catch((error) => {
         writeLog('error', 'health.check_failed', {
@@ -1830,6 +1887,7 @@ if (isMain) {
 export {
   API_PREFIX,
   UI_PREFIX,
+  buildIdentityPayload,
   createServer,
   filterClassesByRoot,
   injectAppVersion,

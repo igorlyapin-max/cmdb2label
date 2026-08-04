@@ -37,8 +37,10 @@ POST /cmdbuild/custom-api/labels/resolve
 GET  /cmdbuild/custom-api/labels/logging/status
 GET  /cmdbuild/custom-api/labels/health/live
 GET  /cmdbuild/custom-api/labels/health/ready
+GET  /cmdbuild/custom-api/labels/about
 GET  /health/live
 GET  /health/ready
+GET  /about
 GET  /metrics
 ```
 
@@ -124,6 +126,8 @@ CMDB_LABELS_ALIAS_CONFIG_FILE=/run/config/cmdb2label-aliases.json
 ```
 
 Версия, видимая в правом нижнем углу UI, читается только из root `VERSION` в формате `XX.YY.ZZ.NN`. До первого explicit git handoff файл может отсутствовать; в этом случае UI показывает нейтральный fallback `0.0.0.0`. Версия не вычисляется из `package.json`, branch name или Git metadata. Release image assembly обязан включать root `VERSION` в image, чтобы контейнерная сборка из release tag показывала тот же номер, что Git handoff.
+
+Container identity передается через build args `CMDB_LABELS_BUILD_VERSION`, `CMDB_LABELS_BUILD_REVISION`, `CMDB_LABELS_BUILD_SOURCE_STATE`, `CMDB_LABELS_RUNTIME_ARTIFACT_SHA256` и дублируется в OCI labels. Runtime exposes safe identity в `/about`, `/health/*` и `/cmdbuild/custom-api/labels/about`: version, buildVersion, full Git revision, `verified|unverified-local`, SHA256 user-facing runtime artifact `cmdb2label.html` и признак совпадения checksum. Значения не содержат CMDBuild origin, cookies или secrets.
 
 `stdout`/`stderr` обязательны всегда. App-level syslog включается опционально через `CMDB_LABELS_LOG_TARGET=stdout,syslog`; при `CMDB_LABELS_LOG_TARGET=stdout` внешний operational sink должен быть обеспечен deployment/platform слоем, например Docker logging driver, sidecar/agent или централизованный collector.
 

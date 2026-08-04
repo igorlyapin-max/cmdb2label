@@ -7,12 +7,15 @@
 ```bash
 curl -fsS http://127.0.0.1:8094/health/live
 curl -i http://127.0.0.1:8094/health/ready
+curl -fsS http://127.0.0.1:8094/about
 curl -i http://127.0.0.1:8094/cmdbuild/custom-api/labels/health/live
 curl -i http://127.0.0.1:8094/cmdbuild/custom-api/labels/health/ready
+curl -fsS http://127.0.0.1:8094/cmdbuild/custom-api/labels/about
 ```
 
 - `/health/live` проверяет, что Node process отвечает на HTTP.
 - `/health/ready` проверяет runtime config и доступность CMDBuild upstream.
+- `/about` и `/cmdbuild/custom-api/labels/about` отдают safe build identity: `VERSION`, full Git revision, source state и SHA256 runtime artifact.
 - `503` на readiness при невалидном config или недоступном CMDBuild является корректным fail-closed состоянием.
 
 ## Diagnostics
@@ -63,6 +66,7 @@ Endpoint проверяет живую CMDBuild session cookie. Без cookie и
 - Не создавайте `VERSION` вручную для локального запуска; файл обновляется в handoff/release workflow вместе с Git tag.
 - Runtime не берет версию из `package.json`, branch name или Git metadata.
 - Docker image должен включать тот же root `VERSION`; иначе контейнер покажет fallback или старую версию.
+- Raw `docker build` считается `unverified-local`. Для customer delivery используйте canonical helper, который проверяет tracked clean source, OCI labels, `/app/VERSION` и SHA256 `cmdb2label.html`.
 
 Рекомендуемая сборка customer image из release tag:
 
@@ -70,15 +74,25 @@ Endpoint проверяет живую CMDBuild session cookie. Без cookie и
 git clone ssh://git@github.com/igorlyapin-max/cmdb2label.git
 cd cmdb2label
 git fetch --tags
-git checkout v00.00.00.03
+git checkout v00.00.00.04
 
-docker build --pull --no-cache \
-  -t ghcr.io/igorlyapin-max/cmdb2label:00.00.00.03 \
-  -t ghcr.io/igorlyapin-max/cmdb2label:latest \
-  .
+npm run build:image -- \
+  --verified \
+  --tag ghcr.io/igorlyapin-max/cmdb2label:00.00.00.04 \
+  --tag ghcr.io/igorlyapin-max/cmdb2label:latest
 ```
 
 `latest` допустим для стенда, но для rollback/audit всегда сохраняйте версионный tag.
+
+Проверка identity после запуска контейнера:
+
+```bash
+curl -fsS http://127.0.0.1:8094/about
+docker image inspect ghcr.io/igorlyapin-max/cmdb2label:00.00.00.04 \
+  --format '{{json .Config.Labels}}'
+```
+
+Для delivery image `identity.sourceState` должен быть `verified`, `identity.revision` должен совпадать с release commit, а `identity.runtimeArtifact.matchesExpected` должен быть `true`. `--no-cache` сам по себе не доказывает свежесть source и не заменяет identity check.
 
 ## Metrics
 

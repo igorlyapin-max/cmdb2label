@@ -35,6 +35,17 @@ test('container image embeds handoff VERSION source of truth', () => {
   assert.match(dockerfile, /^\s*COPY\s+VERSION\s+\.\/VERSION\s*$/m);
 });
 
+test('container image declares build provenance args and OCI labels', () => {
+  assert.match(dockerfile, /^\s*ARG\s+CMDB_LABELS_BUILD_VERSION=/m);
+  assert.match(dockerfile, /^\s*ARG\s+CMDB_LABELS_BUILD_REVISION=/m);
+  assert.match(dockerfile, /^\s*ARG\s+CMDB_LABELS_BUILD_SOURCE_STATE=/m);
+  assert.match(dockerfile, /^\s*ARG\s+CMDB_LABELS_RUNTIME_ARTIFACT_SHA256=/m);
+  assert.match(dockerfile, /org\.opencontainers\.image\.version="\$\{CMDB_LABELS_BUILD_VERSION\}"/);
+  assert.match(dockerfile, /org\.opencontainers\.image\.revision="\$\{CMDB_LABELS_BUILD_REVISION\}"/);
+  assert.match(dockerfile, /org\.opencontainers\.image\.source-state="\$\{CMDB_LABELS_BUILD_SOURCE_STATE\}"/);
+  assert.match(dockerfile, /org\.opencontainers\.image\.runtime-artifact-sha256="\$\{CMDB_LABELS_RUNTIME_ARTIFACT_SHA256\}"/);
+});
+
 test('cmdb2label dev nginx rejects host injection and h2c upgrade forwarding', () => {
   assert.match(nginxConfig, /return\s+444;/);
   assert.match(nginxConfig, /proxy_set_header\s+Host\s+localhost:8095;/);

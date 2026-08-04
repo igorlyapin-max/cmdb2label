@@ -16,6 +16,10 @@ test('labels health live endpoint reports process liveness', { skip: skipWhenUna
   const json = JSON.parse(result.body);
   assert.equal(json.service, 'cmdb2label');
   assert.equal(json.live, true);
+  assert.equal(typeof json.identity.version, 'string');
+  assert.equal(typeof json.identity.revision, 'string');
+  assert.equal(typeof json.identity.sourceState, 'string');
+  assert.equal(typeof json.identity.runtimeArtifact.sha256, 'string');
 });
 
 test('labels health ready endpoint reports CMDBuild readiness state', { skip: skipWhenUnavailable }, async () => {
@@ -28,6 +32,21 @@ test('labels health ready endpoint reports CMDBuild readiness state', { skip: sk
   assert.equal(Object.prototype.hasOwnProperty.call(json, 'cmdbuild'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(json, 'origin'), false);
   assert.equal(Object.prototype.hasOwnProperty.call(json, 'error'), false);
+});
+
+test('labels about endpoint exposes safe build identity', { skip: skipWhenUnavailable }, async () => {
+  const result = await request('GET', `${proxyOrigin}${apiPrefix}/about`);
+
+  assert.equal(result.statusCode, 200);
+  const json = JSON.parse(result.body);
+  assert.equal(json.service, 'cmdb2label');
+  assert.equal(typeof json.identity.version, 'string');
+  assert.equal(typeof json.identity.buildVersion, 'string');
+  assert.equal(typeof json.identity.revision, 'string');
+  assert.equal(typeof json.identity.sourceState, 'string');
+  assert.equal(typeof json.identity.runtimeArtifact.sha256, 'string');
+  assert.equal(Object.prototype.hasOwnProperty.call(json, 'cmdbuild'), false);
+  assert.equal(Object.prototype.hasOwnProperty.call(json, 'origin'), false);
 });
 
 test('labels UI is served from backend-owned route', { skip: skipWhenUnavailable }, async () => {
