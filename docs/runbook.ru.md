@@ -35,6 +35,7 @@ CMDB_LABELS_DIAGNOSTIC_MODE=Verbose npm start
 
 ```bash
 CMDB_LABELS_LOG_TARGET=stdout
+CMDB_LABELS_LOG_EXTERNAL_SINK=platform
 CMDB_LABELS_LOG_TARGET=stdout,syslog
 CMDB_LABELS_SYSLOG_HOST=127.0.0.1
 CMDB_LABELS_SYSLOG_PORT=514
@@ -42,7 +43,7 @@ CMDB_LABELS_SYSLOG_PROTOCOL=udp
 CMDB_LABELS_SYSLOG_FACILITY=local0
 ```
 
-Syslog является опциональной app-level возможностью. Если используется `CMDB_LABELS_LOG_TARGET=stdout`, внешний operational sink должен быть обеспечен deployment/platform слоем: Docker logging driver, syslog/Fluent Bit/Filebeat sidecar, collector/agent, ELK/OpenSearch pipeline или аналог.
+Syslog является опциональной app-level возможностью. Если используется `CMDB_LABELS_LOG_TARGET=stdout`, production startup требует `CMDB_LABELS_LOG_EXTERNAL_SINK=platform`, `collector`, `sidecar` или `docker-driver`. Это фиксирует, что внешний operational sink обеспечен deployment/platform слоем: Docker logging driver, syslog/Fluent Bit/Filebeat sidecar, collector/agent, ELK/OpenSearch pipeline или аналог.
 
 Если используется `CMDB_LABELS_LOG_TARGET=stdout,syslog`, backend валидирует `CMDB_LABELS_SYSLOG_HOST`, `CMDB_LABELS_SYSLOG_PORT`, `CMDB_LABELS_SYSLOG_PROTOCOL` и `CMDB_LABELS_SYSLOG_FACILITY` на старте и в readiness.
 
@@ -68,6 +69,27 @@ Endpoint проверяет живую CMDBuild session cookie. Без cookie и
 - Docker image должен включать тот же root `VERSION`; иначе контейнер покажет fallback или старую версию.
 - Plain `docker build` поддержан для ручной customer source build и всегда считается `unverified-local`. Он не требует `npm`, Git metadata или build args на build host, но генерирует `/app/build-identity.json` из переданного Docker build context.
 - Для verified customer delivery используйте canonical helper, который проверяет tracked clean source, OCI labels, `/app/VERSION` и SHA256 `cmdb2label.html`.
+
+Рядом с версией отображается footer. По умолчанию:
+
+```html
+<div class="page-footer">
+  <div class="footer-title">Разработано Департаментом информационных технологий</div>
+  <div>Предложения и замечания направлять на почту: <a href="mailto:ritm.all@gkm.ru?subject=Предложения по CMDBuild Label">ritm.all@gkm.ru</a></div>
+</div>
+```
+
+Настройки footer:
+
+```bash
+CMDB_LABELS_FOOTER_ENABLED=true
+CMDB_LABELS_FOOTER_TITLE=Разработано Департаментом информационных технологий
+CMDB_LABELS_FOOTER_TEXT=Предложения и замечания направлять на почту:
+CMDB_LABELS_FOOTER_EMAIL=ritm.all@gkm.ru
+CMDB_LABELS_FOOTER_SUBJECT=Предложения по CMDBuild Label
+```
+
+Footer hidden при печати. Env-значения экранируются server-side; raw HTML в env не поддерживается.
 
 Ручная сборка customer image из release tag:
 
@@ -107,6 +129,18 @@ npm run build:image -- \
 
 `latest` допустим для стенда, но для rollback/audit всегда сохраняйте версионный tag. Runtime compose для customer delivery должен ссылаться на prebuilt `image:`, а не использовать `build:`.
 
+Image-only запуск на customer/admin host:
+
+```bash
+cp .env.example .env
+editor .env
+CMDB2LABEL_IMAGE=ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05 \
+CMDB2LABEL_ENV_FILE=.env \
+docker compose -f docker-compose.customer.yml up -d
+```
+
+Перед запуском замените placeholders в `.env`: `CMDB_LABELS_CSRF_SECRET`, `CMDBUILD_ORIGIN`, logging sink, aliases path и class root. Runtime host не требует `npm` и не выполняет `build:`.
+
 Проверка identity после запуска контейнера:
 
 ```bash
@@ -116,6 +150,60 @@ docker image inspect ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05 \
 ```
 
 Для verified delivery image `identity.sourceState` должен быть `verified`, `identity.buildMode` должен быть `canonical`, `identity.revision` должен совпадать с release commit, а `identity.runtimeArtifact.matchesExpected` должен быть `true`. `--no-cache` сам по себе не доказывает свежесть source и не заменяет identity check.
+
+## Customer CA / certificates
+
+Реальные сертификаты заказчика являются deployment artifacts. Не коммитьте `*.crt`, `*.pem`, `*.key`, `*.p12`, customer archives и fingerprint-файлы в public source. В репозитории оставлена только структура `certs/customer-ca/`.
+
+Сертификаты нужны только если контур использует private CA для одного из путей:
+
+- private registry или registry mirror;
+- `CMDBUILD_ORIGIN=https://...` с корпоративным/private CA;
+- reverse proxy или corporate proxy с TLS inspection;
+- любой internal HTTPS endpoint, к которому обращается контейнер.
+
+Default mode - runtime mount:
+
+```bash
+mkdir -p certs/customer-ca
+cp /secure/customer/CheckPoint.crt certs/customer-ca/customer-ca.crt
+sha256sum certs/customer-ca/customer-ca.crt
+
+CMDB2LABEL_IMAGE=ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05 \
+CMDB2LABEL_ENV_FILE=.env \
+CMDB_LABELS_CUSTOM_CA_HOST_FILE=./certs/customer-ca/customer-ca.crt \
+docker compose \
+  -f docker-compose.customer.yml \
+  -f docker-compose.customer-ca.yml \
+  up -d --force-recreate
+```
+
+В `.env` при mount mode:
+
+```bash
+CMDB_LABELS_CUSTOM_CA_MODE=mount
+CMDB_LABELS_CUSTOM_CA_FILE=/etc/cmdb2label/customer-ca/customer-ca.crt
+NODE_EXTRA_CA_CERTS=/etc/cmdb2label/customer-ca/customer-ca.crt
+```
+
+Backend валидирует, что файл CA существует и читается. Smoke для TLS выполняйте без `--insecure`; использование `--insecure` скрывает проблему trust store и не принимается как delivery evidence.
+
+Embedded mode допускается только для customer-specific immutable image: до `docker build` положите `*.crt` или `*.pem` в ignored каталог `certs/customer-ca/`. Dockerfile копирует этот каталог в trust store image и запускает `update-ca-certificates`. После rotation сертификата пересоберите image, проверьте fingerprint и `/about` identity.
+
+Registry trust настраивается на Docker host отдельно от приложения. Для private registry администратор должен настроить `docker login`, corporate CA для Docker daemon или registry mirror согласно политике площадки, затем проверить:
+
+```bash
+docker pull ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05
+docker image inspect ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05 \
+  --format '{{.Id}} {{index .Config.Labels "org.opencontainers.image.version"}}'
+```
+
+DNS/proxy/firewall prerequisites:
+
+- runtime host должен резолвить и достигать `CMDBUILD_ORIGIN`;
+- backend port `8094` публикуется только на loopback/internal interface, если shared nginx обслуживает user-facing `/cmdbuild/*`;
+- shared nginx должен проксировать только `/cmdbuild/labels/*` и `/cmdbuild/custom-api/labels/*` в `cmdb2label`;
+- `/metrics` не публикуется наружу без отдельной защиты.
 
 ## Metrics
 
@@ -154,6 +242,13 @@ curl -fsS http://127.0.0.1:8094/metrics
 `Code` остается fallback-алиасом для `inv`, но business aliases имеют приоритет. Если у заказчика есть отдельный атрибут инвентарного номера, добавьте его в `aliases.inv`; не используйте `Code` как единственный inventory alias, если это технический код карточки.
 
 При copy/paste из UI CMDBuild поле `Тип / Модель` считается display path и разбирается до REST-дозапроса: значение вида `ТД WiFi / HPE Aruba IAP-207` дает `type = "ТД WiFi"` и `model = "HPE Aruba IAP-207"`. Явное поле `Тип` имеет приоритет. Обычное поле `Модель` со slash, например `HP / HP 1111`, не разбирается как display path.
+
+CSV с одной колонкой:
+
+- заголовок `SN` или `Серийный номер` означает список серийных номеров;
+- заголовок `Инв. номер` или `Инвентарный номер` означает список инвентарных номеров;
+- если заголовка нет или он не распознан, UI передает значение как внутренний `lookupKey`; backend ищет карточку сначала по `SN`, затем по `Инв. номер`;
+- `lookupKey` не печатается и не подставляется в `Инв. номер` без найденной карточки CMDBuild.
 
 Где править:
 

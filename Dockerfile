@@ -1,6 +1,10 @@
-FROM node:22-alpine
+FROM node:22-bookworm-slim
 
 WORKDIR /app
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
 ARG CMDB_LABELS_BUILD_VERSION=0.0.0.0
 ARG CMDB_LABELS_BUILD_REVISION=unknown
@@ -29,10 +33,13 @@ COPY VERSION ./VERSION
 COPY cmdb2label.html ./cmdb2label.html
 COPY src ./src
 COPY scripts ./scripts
+COPY certs/customer-ca /usr/local/share/ca-certificates/cmdb2label-customer
 
 RUN node -e "const fs=require('node:fs');const crypto=require('node:crypto');const version=fs.readFileSync('VERSION','utf8').trim();const html=fs.readFileSync('cmdb2label.html');const actualHash=crypto.createHash('sha256').update(html).digest('hex');const versionArg=process.env.CMDB_LABELS_BUILD_VERSION||'';const revisionArg=String(process.env.CMDB_LABELS_BUILD_REVISION||'').toLowerCase();const sourceArg=process.env.CMDB_LABELS_BUILD_SOURCE_STATE||'';const hashArg=String(process.env.CMDB_LABELS_RUNTIME_ARTIFACT_SHA256||'').toLowerCase();const mode=process.env.CMDB_LABELS_BUILD_MODE==='canonical'?'canonical':'manual';const buildVersion=/^\\d{2}\\.\\d{2}\\.\\d{2}\\.\\d{2}$/.test(versionArg)?versionArg:version;const revision=/^[0-9a-f]{40}$/.test(revisionArg)?revisionArg:'unknown';let sourceState=sourceArg==='verified'?'verified':'unverified-local';const expectedHash=/^[0-9a-f]{64}$/.test(hashArg)?hashArg:actualHash;if(sourceState==='verified'&&(mode!=='canonical'||buildVersion!==version||revision==='unknown'||expectedHash!==actualHash)){throw new Error('verified image provenance does not match build context');}if(sourceState!=='verified')sourceState='unverified-local';fs.writeFileSync('build-identity.json',JSON.stringify({version,buildVersion,revision,sourceState,buildMode:mode,runtimeArtifact:{path:'cmdb2label.html',sha256:actualHash,expectedSha256:expectedHash,matchesExpected:actualHash===expectedHash}},null,2)+'\n');"
+RUN if find /usr/local/share/ca-certificates/cmdb2label-customer -type f \( -name '*.crt' -o -name '*.pem' \) -print -quit | grep -q .; then update-ca-certificates; fi
 
-RUN addgroup -S cmdb2label && adduser -S cmdb2label -G cmdb2label
+RUN groupadd --system cmdb2label \
+ && useradd --system --gid cmdb2label --no-create-home --shell /usr/sbin/nologin cmdb2label
 USER cmdb2label
 
 EXPOSE 8094

@@ -337,6 +337,7 @@ export function normalizeDraftDevice(input = {}, aliases = DEFAULT_FIELD_ALIASES
     device[field] = cleanValue(input[field]);
   }
   if (!device.type) device.type = cleanValue(input.cls);
+  const lookupKey = cleanValue(input.lookupKey);
 
   const rawFields = Array.isArray(input.rawFields) ? input.rawFields : [];
   let pendingHierarchicalType = '';
@@ -357,6 +358,7 @@ export function normalizeDraftDevice(input = {}, aliases = DEFAULT_FIELD_ALIASES
 
   return {
     ...device,
+    lookupKey,
     source: cleanValue(input.source),
     row: input.row === undefined ? '' : input.row
   };
@@ -416,7 +418,7 @@ export function deviceRequiredErrors(device, rowLabel) {
 }
 
 export function hasLookupKey(device) {
-  return Boolean(cleanValue(device && device.inv) || cleanValue(device && device.sn));
+  return Boolean(cleanValue(device && device.inv) || cleanValue(device && device.sn) || cleanValue(device && device.lookupKey));
 }
 
 export function isCompleteDevice(device) {

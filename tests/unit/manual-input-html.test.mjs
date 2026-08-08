@@ -30,14 +30,21 @@ function createHtmlHelpers() {
     extractFunction(html, 'getAliasPriority'),
     extractFunction(html, 'getAliasMatch'),
     extractFunction(html, 'normalizeHeader'),
+    extractFunction(html, 'getHeaderLine'),
+    extractFunction(html, 'parseCsv'),
+    extractFunction(html, 'detectDelimiter'),
     extractFunction(html, 'isHierarchicalModelDisplayName'),
     extractFunction(html, 'splitHierarchicalModelDisplay'),
     'const ALIAS_LOOKUP = buildAliasLookup();',
+    extractFunction(html, 'isBlankRow'),
+    extractFunction(html, 'mapSingleColumnCsv'),
     extractFunction(html, 'mapCsvHeaders'),
     extractFunction(html, 'validateCsvRow'),
     extractFunction(html, 'parseManualDevice'),
     extractFunction(html, 'encodeUtf8'),
+    'globalThis.detectDelimiter = detectDelimiter;',
     'globalThis.mapCsvHeaders = mapCsvHeaders;',
+    'globalThis.mapSingleColumnCsv = mapSingleColumnCsv;',
     'globalThis.validateCsvRow = validateCsvRow;',
     'globalThis.parseManualDevice = parseManualDevice;',
     'globalThis.encodeUtf8 = encodeUtf8;'
@@ -195,6 +202,49 @@ test('CSV headers split CMDB hierarchical type/model display', () => {
   assert.equal(parsed.device.sn, 'CNDDJSTGFT');
 });
 
+test('single-column CSV with SN header maps values to serial number', () => {
+  const rows = [['SN'], ['CNDDJSTGFT']];
+  const headerResult = helpers.mapSingleColumnCsv(rows);
+  const parsed = helpers.validateCsvRow(rows[1], headerResult.mapping, 2);
+
+  assert.equal(headerResult.errors.length, 0);
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.device.sn, 'CNDDJSTGFT');
+  assert.equal(parsed.device.inv, '');
+  assert.equal(parsed.device.lookupKey, '');
+});
+
+test('single-column CSV auto delimiter does not reject one-column input', () => {
+  const delimiter = helpers.detectDelimiter('SN\nCNDDJSTGFT');
+
+  assert.equal(delimiter.char, ';');
+  assert.equal(delimiter.label, 'single-column');
+});
+
+test('single-column CSV with inventory header maps values to inventory number', () => {
+  const rows = [['Инвентарный номер'], ['7700010000160724']];
+  const headerResult = helpers.mapSingleColumnCsv(rows);
+  const parsed = helpers.validateCsvRow(rows[1], headerResult.mapping, 2);
+
+  assert.equal(headerResult.errors.length, 0);
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.device.inv, '7700010000160724');
+  assert.equal(parsed.device.sn, '');
+  assert.equal(parsed.device.lookupKey, '');
+});
+
+test('single-column CSV without supported header maps first value to lookup key', () => {
+  const rows = [['CNDDJSTGFT']];
+  const headerResult = helpers.mapSingleColumnCsv(rows);
+  const parsed = helpers.validateCsvRow(rows[0], headerResult.mapping, 1);
+
+  assert.equal(headerResult.rows.length, 1);
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.device.lookupKey, 'CNDDJSTGFT');
+  assert.equal(parsed.device.inv, '');
+  assert.equal(parsed.device.sn, '');
+});
+
 test('CSV headers do not split ordinary model values with slash', () => {
   const headerResult = helpers.mapCsvHeaders(['Модель']);
   const parsed = helpers.validateCsvRow(['HP / HP 1111'], headerResult.mapping, 2);
@@ -236,4 +286,11 @@ test('static UI exposes fallback app version badge and hides it from print', () 
   assert.match(html, /class="app-version"/);
   assert.match(html, /v<span data-app-version>0\.0\.0\.0<\/span>/);
   assert.match(html, /@media print[\s\S]*\.app-version[\s\S]*display: none !important;/);
+});
+
+test('static UI exposes default footer and hides it from print', () => {
+  assert.match(html, /id="pageFooter"/);
+  assert.match(html, /Разработано Департаментом информационных технологий/);
+  assert.match(html, /mailto:ritm\.all@gkm\.ru\?subject=/);
+  assert.match(html, /@media print[\s\S]*\.page-footer[\s\S]*display: none !important;/);
 });

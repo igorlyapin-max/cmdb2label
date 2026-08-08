@@ -1,0 +1,15 @@
+services:
+  cmdb2label:
+    image: ${CMDB2LABEL_IMAGE:-ghcr.io/igorlyapin-max/cmdb2label:latest}
+    container_name: ${CMDB2LABEL_CONTAINER_NAME:-cmdb2label}
+    restart: unless-stopped
+    env_file:
+      - ${CMDB2LABEL_ENV_FILE:-.env.example}
+    ports:
+      - "${CMDB_LABELS_BIND:-127.0.0.1}:${CMDB_LABELS_PORT:-8094}:8094"
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('node:http').get({host:'127.0.0.1',port:8094,path:'/health/live'},r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 3s
+      retries: 3
+      start_period: 10s

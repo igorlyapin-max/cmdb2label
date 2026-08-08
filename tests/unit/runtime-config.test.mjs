@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   buildIdentityPayload,
   injectAppVersion,
+  injectFooterConfig,
   normalizeClassRootPath,
   normalizeLogTargets,
   readinessPayload,
@@ -39,11 +40,23 @@ test('production runtime rejects example CSRF placeholder', () => {
   assert.equal(result.errors.some((error) => error.code === 'csrf_secret_placeholder'), true);
 });
 
-test('runtime config accepts production with CSRF secret and stdout logging', () => {
+test('runtime config rejects production stdout-only logging without external sink', () => {
   const result = validateRuntimeConfig({
     nodeEnv: 'production',
     csrfSecret: 'stable-test-value',
     logTargets: ['stdout']
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === 'external_log_sink_required'), true);
+});
+
+test('runtime config accepts production stdout logging with platform sink', () => {
+  const result = validateRuntimeConfig({
+    nodeEnv: 'production',
+    csrfSecret: 'stable-test-value',
+    logTargets: ['stdout'],
+    externalLogSink: 'platform'
   });
 
   assert.equal(result.ok, true);
@@ -116,6 +129,43 @@ test('runtime config rejects invalid bounded integer values', () => {
 
   assert.equal(result.ok, false);
   assert.equal(result.errors.filter((error) => error.code === 'runtime_integer_invalid').length, 3);
+});
+
+test('runtime config validates custom CA mount mode', () => {
+  const missing = validateRuntimeConfig({
+    nodeEnv: 'development',
+    csrfSecret: 'dev-value',
+    logTargets: ['stdout'],
+    env: {
+      NODE_ENV: 'development',
+      CMDB_LABELS_CUSTOM_CA_MODE: 'mount',
+      CMDB_LABELS_CUSTOM_CA_FILE: path.join(os.tmpdir(), 'cmdb2label-missing-ca.crt')
+    }
+  });
+
+  assert.equal(missing.ok, false);
+  assert.equal(missing.errors.some((error) => error.code === 'custom_ca_file_unreadable'), true);
+
+  const filePath = path.join(os.tmpdir(), `cmdb2label-ca-${process.pid}.crt`);
+  fs.writeFileSync(filePath, '-----BEGIN CERTIFICATE-----\nplaceholder\n-----END CERTIFICATE-----\n');
+  try {
+    const valid = validateRuntimeConfig({
+      nodeEnv: 'development',
+      csrfSecret: 'dev-value',
+      logTargets: ['stdout'],
+      env: {
+        NODE_ENV: 'development',
+        CMDB_LABELS_CUSTOM_CA_MODE: 'mount',
+        CMDB_LABELS_CUSTOM_CA_FILE: filePath
+      }
+    });
+
+    assert.equal(valid.ok, true);
+    assert.equal(valid.customCa.mode, 'mount');
+    assert.equal(valid.customCa.file, filePath);
+  } finally {
+    fs.rmSync(filePath, { force: true });
+  }
 });
 
 test('readiness reports not ready when runtime config is invalid', async () => {
@@ -220,7 +270,26 @@ test('app version reads handoff VERSION format and injects it into UI html', () 
   }
 });
 
-test('build identity exposes version, revision, source state, and runtime artifact checksum', () => {
+test('footer config injection escapes text and encodes mailto subject', () => {
+  const html = `<div id="pageFooter" class="page-footer">
+    <div class="footer-title" data-footer-title>Old</div>
+    <div><span data-footer-text>Old:</span> <a data-footer-email href="mailto:old@example.test">old@example.test</a></div>
+</div>`;
+  const result = injectFooterConfig(html, {
+    enabled: true,
+    title: '<DIT>',
+    text: 'Пишите сюда:',
+    email: 'ritm.all@gkm.ru',
+    subject: 'Предложения по CMDBuild Label'
+  });
+
+  assert.match(result, /&lt;DIT&gt;/);
+  assert.match(result, /Пишите сюда:/);
+  assert.match(result, /mailto:ritm\.all@gkm\.ru\?subject=%D0%9F%D1%80/);
+  assert.doesNotMatch(result, /<DIT>/);
+});
+
+test('build identity does not promote runtime env provenance to verified', () => {
   const versionPath = path.join(os.tmpdir(), `cmdb2label-identity-version-${process.pid}`);
   const artifactPath = path.join(os.tmpdir(), `cmdb2label-identity-ui-${process.pid}.html`);
   fs.writeFileSync(versionPath, '00.00.00.09\n');
@@ -241,13 +310,54 @@ test('build identity exposes version, revision, source state, and runtime artifa
     assert.equal(identity.version, '00.00.00.09');
     assert.equal(identity.buildVersion, '00.00.00.09');
     assert.equal(identity.revision, '1234567890abcdef1234567890abcdef12345678');
-    assert.equal(identity.sourceState, 'verified');
+    assert.equal(identity.sourceState, 'unverified-local');
     assert.equal(identity.buildMode, 'manual');
     assert.equal(identity.runtimeArtifact.sha256, hash);
     assert.equal(identity.runtimeArtifact.matchesExpected, true);
   } finally {
     fs.rmSync(versionPath, { force: true });
     fs.rmSync(artifactPath, { force: true });
+  }
+});
+
+test('build identity exposes verified only from matching embedded canonical provenance', () => {
+  const versionPath = path.join(os.tmpdir(), `cmdb2label-verified-version-${process.pid}`);
+  const artifactPath = path.join(os.tmpdir(), `cmdb2label-verified-ui-${process.pid}.html`);
+  const identityPath = path.join(os.tmpdir(), `cmdb2label-verified-identity-${process.pid}.json`);
+  fs.writeFileSync(versionPath, '00.00.00.11\n');
+  fs.writeFileSync(artifactPath, '<html>verified image</html>');
+  const hash = cryptoHashFile(artifactPath);
+  fs.writeFileSync(identityPath, JSON.stringify({
+    version: '00.00.00.11',
+    buildVersion: '00.00.00.11',
+    revision: '1234567890abcdef1234567890abcdef12345678',
+    sourceState: 'verified',
+    buildMode: 'canonical',
+    runtimeArtifact: {
+      path: 'cmdb2label.html',
+      sha256: hash,
+      expectedSha256: hash,
+      matchesExpected: true
+    }
+  }));
+
+  try {
+    const identity = buildIdentityPayload({
+      CMDB_LABELS_BUILD_SOURCE_STATE: 'unverified-local',
+      CMDB_LABELS_BUILD_MODE: 'manual'
+    }, {
+      versionFilePath: versionPath,
+      runtimeArtifactPath: artifactPath,
+      buildIdentityFilePath: identityPath
+    });
+
+    assert.equal(identity.sourceState, 'verified');
+    assert.equal(identity.buildMode, 'canonical');
+    assert.equal(identity.runtimeArtifact.matchesExpected, true);
+  } finally {
+    fs.rmSync(versionPath, { force: true });
+    fs.rmSync(artifactPath, { force: true });
+    fs.rmSync(identityPath, { force: true });
   }
 });
 

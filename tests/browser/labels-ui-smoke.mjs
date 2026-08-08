@@ -54,6 +54,9 @@ async function main() {
       assert.equal(result.title, 'Генератор этикеток 6x3');
       assert.match(result.version.text, /^v(0\.0\.0\.0|\d{2}\.\d{2}\.\d{2}\.\d{2})$/);
       assert.equal(result.version.visible, true);
+      assert.equal(result.footer.visible, true);
+      assert.match(result.footer.text, /Разработано Департаментом информационных технологий/);
+      assert.match(result.footer.href, /^mailto:ritm\.all@gkm\.ru\?subject=/);
       assert.equal(result.first.generateEnabled, true);
       assert.equal(result.first.dataRows, 1);
       assert.equal(result.first.labels, 1);
@@ -177,6 +180,14 @@ function uiScenarioExpression() {
       text: versionBadge ? versionBadge.textContent.trim() : '',
       visible: Boolean(versionBox && versionBox.width > 0 && versionBox.height > 0)
     };
+    const footerElement = byId('pageFooter');
+    const footerBox = footerElement ? footerElement.getBoundingClientRect() : null;
+    const footerLink = footerElement ? footerElement.querySelector('[data-footer-email]') : null;
+    const footer = {
+      text: footerElement ? footerElement.textContent.trim() : '',
+      href: footerLink ? footerLink.getAttribute('href') || '' : '',
+      visible: Boolean(footerBox && footerBox.width > 0 && footerBox.height > 0)
+    };
     const rowText = () => Array.from(document.querySelectorAll('#deviceListBody tr')[0].cells)
       .map((cell) => cell.textContent.trim());
     const state = () => ({
@@ -240,7 +251,7 @@ function uiScenarioExpression() {
       errorsText: byId('validationErrors').textContent
     };
 
-    return { title: document.title, version, first, legacy, missing };
+    return { title: document.title, version, footer, first, legacy, missing };
   }})()`;
 }
 

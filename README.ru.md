@@ -49,6 +49,8 @@ C2M-CITY-20260523-SN-300
 
 Если задан `SN` или `Инв. номер`, backend дозапрашивает недостающие `Инв. номер`, `Тип/Модель`, `Тип`, `SN` через CMDBuild REST от имени текущего пользователя. `Тип` по умолчанию выводится из parent lookup значения атрибута модели.
 
+CSV с одной колонкой поддерживается как список ключей поиска. Если заголовок распознан как `SN` или `Инвентарный номер`, значения импортируются в соответствующее поле. Если заголовка нет или он не распознан, значения отправляются как внутренний `lookupKey`: backend ищет сначала по `SN`, затем по `Инв. номер`, и не подставляет сам `lookupKey` в поле `Инв. номер`.
+
 ## Основные команды
 
 ```bash
@@ -56,6 +58,7 @@ npm run check
 npm test
 CMDB_LABELS_PROXY=http://127.0.0.1:8088 npm run test:browser
 npm run secret:scan
+npm run ci:container
 npm run build:zip
 npm run register:custompage:dry-run
 npm run register:custompage
@@ -65,6 +68,17 @@ npm start
 `register:custompage` требует действующую CMDBuild-сессию или учетные данные администратора. Подробности: [Регистрация custom page](docs/custom-page-registration.ru.md).
 
 Для production-like запуска задайте стабильный `CMDB_LABELS_CSRF_SECRET`; пример безопасных env-переменных находится в [.env.example](.env.example).
+
+Для customer/admin container runtime используйте image-only compose:
+
+```bash
+cp .env.example .env
+CMDB2LABEL_IMAGE=ghcr.io/igorlyapin-max/cmdb2label:<version> \
+CMDB2LABEL_ENV_FILE=.env \
+docker compose -f docker-compose.customer.yml up -d
+```
+
+Если контур использует private CA, подключайте `docker-compose.customer-ca.yml`; реальные сертификаты заказчика остаются deployment artifacts и не коммитятся.
 
 ## Документация
 

@@ -4,6 +4,8 @@ import fs from 'node:fs';
 
 const nginxConfig = fs.readFileSync(new URL('../../nginx/cmdb2label-dev.conf', import.meta.url), 'utf8');
 const nginxCompose = fs.readFileSync(new URL('../../docker-compose.nginx.yml', import.meta.url), 'utf8');
+const customerCompose = fs.readFileSync(new URL('../../docker-compose.customer.yml', import.meta.url), 'utf8');
+const customerCaCompose = fs.readFileSync(new URL('../../docker-compose.customer-ca.yml', import.meta.url), 'utf8');
 const dockerfile = fs.readFileSync(new URL('../../Dockerfile', import.meta.url), 'utf8');
 const sharedNginxUrl = new URL('../../../cmdbcustompages/nginx/cmdbdynamicpages.conf', import.meta.url);
 const sharedNginxConfig = fs.existsSync(sharedNginxUrl) ? fs.readFileSync(sharedNginxUrl, 'utf8') : '';
@@ -48,6 +50,27 @@ test('container image declares build provenance args and OCI labels', () => {
   assert.match(dockerfile, /org\.opencontainers\.image\.build-mode="\$\{CMDB_LABELS_BUILD_MODE\}"/);
   assert.match(dockerfile, /build-identity\.json/);
   assert.match(dockerfile, /verified image provenance does not match build context/);
+});
+
+test('container image installs CA tooling for customer trust store', () => {
+  assert.match(dockerfile, /apt-get\s+install\s+-y\s+--no-install-recommends\s+ca-certificates/);
+  assert.match(dockerfile, /update-ca-certificates/);
+});
+
+test('container image uses deterministic non-root system user', () => {
+  assert.match(dockerfile, /groupadd\s+--system\s+cmdb2label/);
+  assert.match(dockerfile, /useradd\s+--system\s+--gid\s+cmdb2label\s+--no-create-home\s+--shell\s+\/usr\/sbin\/nologin\s+cmdb2label/);
+  assert.match(dockerfile, /^\s*USER\s+cmdb2label\s*$/m);
+  assert.doesNotMatch(dockerfile, /\baddgroup\b|\badduser\b/);
+});
+
+test('customer runtime compose is image-only and custom CA is an explicit override', () => {
+  assert.match(customerCompose, /image:\s+\$\{CMDB2LABEL_IMAGE:-ghcr\.io\/igorlyapin-max\/cmdb2label:latest\}/);
+  assert.doesNotMatch(customerCompose, /^\s*build:/m);
+  assert.match(customerCompose, /env_file:/);
+  assert.match(customerCaCompose, /CMDB_LABELS_CUSTOM_CA_MODE:\s+mount/);
+  assert.match(customerCaCompose, /NODE_EXTRA_CA_CERTS:/);
+  assert.match(customerCaCompose, /:ro/);
 });
 
 test('cmdb2label dev nginx rejects host injection and h2c upgrade forwarding', () => {

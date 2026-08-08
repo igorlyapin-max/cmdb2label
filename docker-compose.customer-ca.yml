@@ -1,0 +1,8 @@
+services:
+  cmdb2label:
+    environment:
+      CMDB_LABELS_CUSTOM_CA_MODE: mount
+      CMDB_LABELS_CUSTOM_CA_FILE: /etc/cmdb2label/customer-ca/customer-ca.crt
+      NODE_EXTRA_CA_CERTS: /etc/cmdb2label/customer-ca/customer-ca.crt
+    volumes:
+      - ${CMDB_LABELS_CUSTOM_CA_HOST_FILE:-./certs/customer-ca/customer-ca.crt}:/etc/cmdb2label/customer-ca/customer-ca.crt:ro

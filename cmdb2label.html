@@ -135,6 +135,26 @@
             box-shadow: 0 1px 4px rgba(15,23,42,0.08);
             pointer-events: none;
         }
+        .page-footer {
+            position: fixed;
+            right: 12px;
+            bottom: 38px;
+            z-index: 20;
+            max-width: min(420px, calc(100vw - 24px));
+            padding: 8px 10px;
+            border: 1px solid #cbd5e1;
+            border-radius: 8px;
+            background: rgba(255,255,255,0.94);
+            color: #475569;
+            font-size: 12px;
+            line-height: 1.35;
+            text-align: right;
+            box-shadow: 0 1px 4px rgba(15,23,42,0.08);
+        }
+        .page-footer[hidden] { display: none !important; }
+        .footer-title { font-weight: 700; color: #334155; }
+        .page-footer a { color: var(--primary); text-decoration: none; }
+        .page-footer a:hover { text-decoration: underline; }
 
         @media (max-width: 760px) {
             body { padding: 12px; }
@@ -143,6 +163,12 @@
             .device-list { overflow-x: auto; }
             .device-list table { min-width: 720px; }
             .app-version { right: 8px; bottom: 8px; }
+            .page-footer {
+                right: 8px;
+                bottom: 34px;
+                max-width: calc(100vw - 16px);
+                font-size: 11px;
+            }
         }
 
         /* 🔑 ИСПРАВЛЕННЫЕ СТИЛИ ДЛЯ ПЕЧАТИ */
@@ -168,6 +194,11 @@
             }
 
             .app-version {
+                display: none !important;
+                visibility: hidden !important;
+            }
+
+            .page-footer {
                 display: none !important;
                 visibility: hidden !important;
             }
@@ -286,6 +317,10 @@
 </div>
 
 <div id="appVersion" class="app-version" aria-label="Версия приложения">v<span data-app-version>0.0.0.0</span></div>
+<div id="pageFooter" class="page-footer">
+    <div class="footer-title" data-footer-title>Разработано Департаментом информационных технологий</div>
+    <div><span data-footer-text>Предложения и замечания направлять на почту:</span> <a data-footer-email href="mailto:ritm.all@gkm.ru?subject=%D0%9F%D1%80%D0%B5%D0%B4%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F%20%D0%BF%D0%BE%20CMDBuild%20Label">ritm.all@gkm.ru</a></div>
+</div>
 
 <script>
 const REQUIRED_FIELDS = ['inv', 'model', 'type', 'sn'];
@@ -295,6 +330,7 @@ const FIELD_LABELS = {
     type: 'Тип',
     sn: 'Серийный номер'
 };
+const OPTIONAL_FIELDS = ['lookupKey'];
 const DELIMITERS = { semicolon: ';', comma: ',', tab: '\t' };
 const HEADER_ALIASES = {
     inv: ['Инв. номер', 'Инвентарный номер', 'Инв номер', 'InventoryId', 'AssetInventoryNumber', 'AssetInventoryNo', 'Code', 'code', 'invnet', 'inv', 'inventory', 'inventoryNumber', 'inventoryNo', 'assetTag', 'assetNumber'],
@@ -489,20 +525,24 @@ async function importCsvText(rawText, sourceName) {
     }
 
     rows[0][0] = stripBom(rows[0][0] || '');
-    const headerResult = mapCsvHeaders(rows[0]);
+    const singleColumn = isSingleColumnCsv(rows);
+    const headerResult = singleColumn ? mapSingleColumnCsv(rows) : mapCsvHeaders(rows[0]);
     errors.push(...headerResult.errors);
 
     const importedDevices = [];
     if (!headerResult.errors.length) {
-        rows.slice(1).forEach((row, index) => {
-            const rowNumber = index + 2;
-            if (isBlankRow(row)) return;
+        const dataRows = singleColumn
+            ? headerResult.rows
+            : rows.slice(1)
+                .map((row, index) => ({ row, rowNumber: index + 2 }))
+                .filter(item => !isBlankRow(item.row));
 
-            const result = validateCsvRow(row, headerResult.mapping, rowNumber);
+        dataRows.forEach(item => {
+            const result = validateCsvRow(item.row, headerResult.mapping, item.rowNumber);
             if (result.errors.length) {
                 errors.push(...result.errors);
                 diag('Verbose', 'csv_row_invalid', {
-                    row: rowNumber,
+                    row: item.rowNumber,
                     fields: result.errors.map(error => error.field)
                 });
                 return;
@@ -510,7 +550,7 @@ async function importCsvText(rawText, sourceName) {
 
             importedDevices.push(result.device);
             diag('Verbose', 'csv_row_valid', {
-                row: rowNumber,
+                row: item.rowNumber,
                 valueLengths: getDeviceValueLengths(result.device)
             });
         });
@@ -535,6 +575,36 @@ async function importCsvText(rawText, sourceName) {
     });
 }
 
+function isSingleColumnCsv(rows) {
+    const nonBlankRows = rows.filter(row => !isBlankRow(row));
+    return Boolean(nonBlankRows.length) && nonBlankRows.every(row => row.length <= 1);
+}
+
+function mapSingleColumnCsv(rows) {
+    const firstValue = String(rows[0] && rows[0][0] || '').trim();
+    const match = getAliasMatch(firstValue);
+    const field = match && ['inv', 'sn'].includes(match.field) ? match.field : 'lookupKey';
+    const startsWithHeader = field !== 'lookupKey';
+    const mapping = { [field]: 0 };
+    const dataRows = [];
+
+    rows.forEach((row, index) => {
+        if (startsWithHeader && index === 0) return;
+        if (isBlankRow(row)) return;
+        dataRows.push({ row, rowNumber: index + 1 });
+    });
+
+    Object.defineProperty(mapping, '__headers', {
+        value: startsWithHeader ? [firstValue] : ['lookupKey'],
+        enumerable: false
+    });
+    Object.defineProperty(mapping, '__singleColumnMode', {
+        value: field,
+        enumerable: false
+    });
+    return { mapping, rows: dataRows, errors: [] };
+}
+
 function resolveCsvDelimiter(text) {
     const selected = document.getElementById('delimiterSelect').value;
     if (selected === 'auto') return detectDelimiter(text);
@@ -556,7 +626,7 @@ function detectDelimiter(text) {
         if (!best || score > best.score) best = { ...candidate, score };
     });
 
-    if (!best || best.score < 2) throw new Error('Не удалось определить разделитель CSV');
+    if (!best || best.score < 2) return { char: ';', label: 'single-column' };
     return best;
 }
 
@@ -718,6 +788,9 @@ function validateCsvRow(row, mapping, rowNumber) {
         acc[field] = '';
         return acc;
     }, {});
+    OPTIONAL_FIELDS.forEach(field => {
+        device[field] = '';
+    });
     const errors = [];
 
     Object.keys(mapping).forEach(field => {
@@ -734,7 +807,7 @@ function validateCsvRow(row, mapping, rowNumber) {
         }
     }
 
-    if (!REQUIRED_FIELDS.some(field => device[field])) {
+    if (!REQUIRED_FIELDS.some(field => device[field]) && !device.lookupKey) {
         errors.push({
             row: rowNumber,
             field: 'Данные',
@@ -767,7 +840,7 @@ function getDeviceValueLengths(device) {
 }
 
 function deviceNeedsResolve(device) {
-    const hasKey = String(device.inv || '').trim() || String(device.sn || '').trim();
+    const hasKey = String(device.inv || '').trim() || String(device.sn || '').trim() || String(device.lookupKey || '').trim();
     const hasMissing = REQUIRED_FIELDS.some(field => !String(device[field] || '').trim());
     return Boolean(hasKey && hasMissing);
 }
@@ -775,7 +848,7 @@ function deviceNeedsResolve(device) {
 function localRequiredErrors(devices) {
     const errors = [];
     devices.forEach((device, index) => {
-        if (!String(device.inv || '').trim() && !String(device.sn || '').trim() && REQUIRED_FIELDS.some(field => !String(device[field] || '').trim())) {
+        if (!String(device.inv || '').trim() && !String(device.sn || '').trim() && !String(device.lookupKey || '').trim() && REQUIRED_FIELDS.some(field => !String(device[field] || '').trim())) {
             errors.push({
                 row: index + 1,
                 field: 'Ключ поиска',
@@ -834,6 +907,8 @@ function normalizeDevice(device) {
     REQUIRED_FIELDS.forEach(field => {
         result[field] = String(device && device[field] !== undefined && device[field] !== null ? device[field] : '').trim();
     });
+    const lookupKey = String(device && device.lookupKey !== undefined && device.lookupKey !== null ? device.lookupKey : '').trim();
+    if (lookupKey) result.lookupKey = lookupKey;
     return result;
 }
 

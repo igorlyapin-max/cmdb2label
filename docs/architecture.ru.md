@@ -80,6 +80,8 @@ GET  /metrics
 }
 ```
 
+Для CSV с одной нераспознанной колонкой UI может передать внутреннее поле `lookupKey`. Это не поле этикетки: backend использует его только для поиска, сначала по `sn`, затем по `inv`, после чего возвращает обычные `inv`, `model`, `type`, `sn` из найденной CMDBuild карточки.
+
 ## CMDBuild discovery
 
 Backend строит каталог доступных классов автоматически:
@@ -107,8 +109,12 @@ CMDBUILD_ORIGIN=http://127.0.0.1:8090
 CMDB_LABELS_CSRF_SECRET=<required-in-production>
 CMDB_LABELS_DIAGNOSTIC_MODE=off|Basic|Verbose
 CMDB_LABELS_LOG_TARGET=stdout|stdout,syslog
+CMDB_LABELS_LOG_EXTERNAL_SINK=platform|collector|sidecar|docker-driver
 CMDB_LABELS_SYSLOG_HOST=127.0.0.1
 CMDB_LABELS_SYSLOG_PORT=514
+CMDB_LABELS_CUSTOM_CA_MODE=none|mount|embedded
+CMDB_LABELS_CUSTOM_CA_FILE=/etc/cmdb2label/customer-ca/customer-ca.crt
+NODE_EXTRA_CA_CERTS=/etc/cmdb2label/customer-ca/customer-ca.crt
 CMDB_LABELS_REQUEST_TIMEOUT_MS=10000
 CMDB_LABELS_HEALTH_TIMEOUT_MS=2000
 CMDB_LABELS_CATALOG_TTL_MS=300000
@@ -123,13 +129,22 @@ CMDB_LABELS_BODY_LIMIT_BYTES=524288
 CMDB_LABELS_CLASS_ROOT_PATH=/classes/ZabbixMonitoring
 CMDB_LABELS_ENABLE_CMDBUILD_PROXY=false
 CMDB_LABELS_ALIAS_CONFIG_FILE=/run/config/cmdb2label-aliases.json
+CMDB_LABELS_FOOTER_ENABLED=true
+CMDB_LABELS_FOOTER_TITLE=Разработано Департаментом информационных технологий
+CMDB_LABELS_FOOTER_TEXT=Предложения и замечания направлять на почту:
+CMDB_LABELS_FOOTER_EMAIL=ritm.all@gkm.ru
+CMDB_LABELS_FOOTER_SUBJECT=Предложения по CMDBuild Label
 ```
 
 Версия, видимая в правом нижнем углу UI, читается только из root `VERSION` в формате `XX.YY.ZZ.NN`. До первого explicit git handoff файл может отсутствовать; в этом случае UI показывает нейтральный fallback `0.0.0.0`. Версия не вычисляется из `package.json`, branch name или Git metadata. Release image assembly обязан включать root `VERSION` в image, чтобы контейнерная сборка из release tag показывала тот же номер, что Git handoff.
 
-Container identity передается через build args `CMDB_LABELS_BUILD_VERSION`, `CMDB_LABELS_BUILD_REVISION`, `CMDB_LABELS_BUILD_SOURCE_STATE`, `CMDB_LABELS_RUNTIME_ARTIFACT_SHA256`, `CMDB_LABELS_BUILD_MODE` и дублируется в OCI labels. Dockerfile также генерирует `/app/build-identity.json` из build context, поэтому plain `docker build` без аргументов получает runnable `unverified-local` identity с checksum `cmdb2label.html`. Canonical helper передает `buildMode=canonical` и может выставить `verified` только при совпадении версии, full Git revision и checksum. Runtime exposes safe identity в `/about`, `/health/*` и `/cmdbuild/custom-api/labels/about`: version, buildVersion, full Git revision, `verified|unverified-local`, `manual|canonical`, SHA256 user-facing runtime artifact `cmdb2label.html` и признак совпадения checksum. Значения не содержат CMDBuild origin, cookies или secrets.
+Footer рядом с версией включен по умолчанию и настраивается через отдельные env-поля. Значения footer экранируются server-side; произвольный HTML из env не поддерживается.
 
-`stdout`/`stderr` обязательны всегда. App-level syslog включается опционально через `CMDB_LABELS_LOG_TARGET=stdout,syslog`; при `CMDB_LABELS_LOG_TARGET=stdout` внешний operational sink должен быть обеспечен deployment/platform слоем, например Docker logging driver, sidecar/agent или централизованный collector.
+Container identity передается через build args `CMDB_LABELS_BUILD_VERSION`, `CMDB_LABELS_BUILD_REVISION`, `CMDB_LABELS_BUILD_SOURCE_STATE`, `CMDB_LABELS_RUNTIME_ARTIFACT_SHA256`, `CMDB_LABELS_BUILD_MODE` и дублируется в OCI labels. Dockerfile также генерирует `/app/build-identity.json` из build context, поэтому plain `docker build` без аргументов получает runnable `unverified-local` identity с checksum `cmdb2label.html`. Canonical helper передает `buildMode=canonical` и может выставить `verified` только при совпадении версии, full Git revision и checksum. Runtime exposes safe identity в `/about`, `/health/*` и `/cmdbuild/custom-api/labels/about`: version, buildVersion, full Git revision, `verified|unverified-local`, `manual|canonical`, SHA256 user-facing runtime artifact `cmdb2label.html` и признак совпадения checksum. `verified` вычисляется только из embedded `/app/build-identity.json`; runtime env не может повысить manual/local image до verified. Значения не содержат CMDBuild origin, cookies или secrets.
+
+`stdout`/`stderr` обязательны всегда. App-level syslog включается опционально через `CMDB_LABELS_LOG_TARGET=stdout,syslog`; при `CMDB_LABELS_LOG_TARGET=stdout` production config обязан задать `CMDB_LABELS_LOG_EXTERNAL_SINK=platform|collector|sidecar|docker-driver`, чтобы deployment/platform sink был явной частью runtime contract.
+
+Customer CA не является application secret и не хранится в public source. Если `CMDBUILD_ORIGIN` или registry идут через private CA, основной режим - read-only mount сертификата и `NODE_EXTRA_CA_CERTS`. Embedded CA разрешен только для customer-specific image: локально положенные `certs/customer-ca/*.crt`/`*.pem` попадают в Docker build context и добавляются в system trust store.
 
 Пример alias/derive config:
 

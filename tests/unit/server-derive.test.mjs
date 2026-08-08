@@ -253,6 +253,33 @@ test('resolveDrafts preserves entered inventory and serial while enriching model
   assert.equal(result.devices[0].type, 'Printer');
 });
 
+test('resolveDrafts enriches ambiguous single-column serial lookup key without using it as inventory', async () => {
+  const result = await resolveDrafts([{ lookupKey: 'CNDDJSTGFT' }], 'auth-customer-lookup-sn', mergeLabelConfig(), {
+    classRootPath: '',
+    cmdbuildRequest: fakeCmdbuildRequest
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0].inv, '7700010000160724');
+  assert.equal(result.devices[0].sn, 'CNDDJSTGFT');
+  assert.equal(result.devices[0].model, 'HPE Aruba IAP-207');
+  assert.equal(result.devices[0].type, 'Printer');
+  assert.notEqual(result.devices[0].inv, 'CNDDJSTGFT');
+});
+
+test('resolveDrafts enriches ambiguous single-column inventory lookup key', async () => {
+  const result = await resolveDrafts([{ lookupKey: '7700010000160724' }], 'auth-customer-lookup-inv', mergeLabelConfig(), {
+    classRootPath: '',
+    cmdbuildRequest: fakeCmdbuildRequest
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0].inv, '7700010000160724');
+  assert.equal(result.devices[0].sn, 'CNDDJSTGFT');
+  assert.equal(result.devices[0].model, 'HPE Aruba IAP-207');
+  assert.equal(result.devices[0].type, 'Printer');
+});
+
 test('filterClassesByRoot keeps root and descendant classes only', () => {
   const classes = [
     { name: 'ZabbixMonitoring', description: 'Root' },

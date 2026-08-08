@@ -86,16 +86,24 @@ const DIAGNOSTIC_MODE = normalizeDiagnosticMode(process.env.CMDB_LABELS_DIAGNOST
 const LOG_LEVEL = normalizeLogLevel(process.env.CMDB_LABELS_LOG_LEVEL || 'info');
 const LOG_FORMAT = normalizeLogFormat(process.env.CMDB_LABELS_LOG_FORMAT || 'json');
 const LOG_TARGETS = normalizeLogTargets(process.env.CMDB_LABELS_LOG_TARGET || 'stdout');
+const LOG_EXTERNAL_SINK = normalizeExternalLogSink(process.env.CMDB_LABELS_LOG_EXTERNAL_SINK || 'none');
 const SYSLOG_HOST = process.env.CMDB_LABELS_SYSLOG_HOST || '127.0.0.1';
 const SYSLOG_PORT = Number(process.env.CMDB_LABELS_SYSLOG_PORT || 514);
 const SYSLOG_PROTOCOL = normalizeSyslogProtocol(process.env.CMDB_LABELS_SYSLOG_PROTOCOL || 'udp');
 const SYSLOG_FACILITY = normalizeSyslogFacility(process.env.CMDB_LABELS_SYSLOG_FACILITY || 'local0');
+const CUSTOM_CA_MODE = normalizeCustomCaMode(process.env.CMDB_LABELS_CUSTOM_CA_MODE || 'none');
+const CUSTOM_CA_FILE = process.env.CMDB_LABELS_CUSTOM_CA_FILE || process.env.NODE_EXTRA_CA_CERTS || '';
 const LOG_REDACT_HEADERS = new Set(['cookie', 'authorization', 'cmdbuild-authorization', 'x-cmdb2label-csrf', 'set-cookie']);
 const PLACEHOLDER_CSRF_SECRETS = new Set(['change-me-to-a-stable-secret-from-secret-store']);
 const CMDBUILD_PROXY_ALLOWLIST_STRICT = process.env.CMDB_LABELS_CMDBUILD_PROXY_ALLOWLIST_STRICT !== 'false';
 const CMDBUILD_PROXY_ENABLED = process.env.CMDB_LABELS_ENABLE_CMDBUILD_PROXY === 'true';
 const PROXY_COOKIE_SAMESITE = process.env.CMDB_LABELS_PROXY_COOKIE_SAMESITE || '';
 const PROXY_COOKIE_SECURE = process.env.CMDB_LABELS_PROXY_COOKIE_SECURE || 'false';
+const FOOTER_ENABLED = process.env.CMDB_LABELS_FOOTER_ENABLED !== 'false';
+const FOOTER_TITLE = process.env.CMDB_LABELS_FOOTER_TITLE || 'Разработано Департаментом информационных технологий';
+const FOOTER_TEXT = process.env.CMDB_LABELS_FOOTER_TEXT || 'Предложения и замечания направлять на почту:';
+const FOOTER_EMAIL = process.env.CMDB_LABELS_FOOTER_EMAIL || 'ritm.all@gkm.ru';
+const FOOTER_SUBJECT = process.env.CMDB_LABELS_FOOTER_SUBJECT || 'Предложения по CMDBuild Label';
 const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50, maxFreeSockets: 10 });
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50, maxFreeSockets: 10 });
 const catalogCache = new Map();
@@ -203,6 +211,16 @@ function normalizeLogTargets(value) {
   return unique.includes('stdout') ? unique : ['stdout', ...unique];
 }
 
+function normalizeExternalLogSink(value) {
+  const text = String(value || '').trim().toLowerCase();
+  return ['platform', 'collector', 'sidecar', 'docker-driver'].includes(text) ? text : 'none';
+}
+
+function normalizeCustomCaMode(value) {
+  const text = String(value || '').trim().toLowerCase();
+  return ['mount', 'embedded'].includes(text) ? text : 'none';
+}
+
 function normalizeSyslogProtocol(value) {
   return String(value || '').trim().toLowerCase() === 'tcp' ? 'tcp' : 'udp';
 }
@@ -305,6 +323,7 @@ function loggingStatus() {
       levels: ['Basic', 'Verbose']
     },
     redactHeaders: Array.from(LOG_REDACT_HEADERS).sort(),
+    externalSink: LOG_EXTERNAL_SINK,
     syslog: LOG_TARGETS.includes('syslog') ? {
       host: SYSLOG_HOST,
       port: SYSLOG_PORT,
@@ -319,9 +338,13 @@ function validateRuntimeConfig(input = {}) {
   const nodeEnv = String(input.nodeEnv === undefined ? env.NODE_ENV || '' : input.nodeEnv || '').trim();
   const csrfSecret = String(input.csrfSecret === undefined ? env.CMDB_LABELS_CSRF_SECRET || '' : input.csrfSecret || '').trim();
   const logTargets = input.logTargets || LOG_TARGETS;
+  const externalLogSink = input.externalLogSink === undefined ?
+    normalizeExternalLogSink(env.CMDB_LABELS_LOG_EXTERNAL_SINK || LOG_EXTERNAL_SINK) :
+    normalizeExternalLogSink(input.externalLogSink);
   const aliasConfigValidation = input.aliasConfigValidation || readAliasConfigFromEnv(env);
   const classRoot = normalizeClassRootPath(env.CMDB_LABELS_CLASS_ROOT_PATH || '');
   const integerValidation = validateRuntimeIntegers(env);
+  const customCaValidation = validateCustomCaConfig(env);
   const errors = [];
   const warnings = [];
 
@@ -359,8 +382,16 @@ function validateRuntimeConfig(input = {}) {
   if (Array.isArray(logTargets) && logTargets.includes('syslog')) {
     errors.push(...validateSyslogConfig(env));
   }
+  if (nodeEnv.toLowerCase() === 'production' && Array.isArray(logTargets) && !logTargets.includes('syslog') && externalLogSink === 'none') {
+    errors.push({
+      code: 'external_log_sink_required',
+      env: 'CMDB_LABELS_LOG_EXTERNAL_SINK',
+      message: 'Production stdout-only logging requires a documented external platform, collector, sidecar, or docker-driver sink.'
+    });
+  }
   errors.push(...integerValidation.errors);
   errors.push(...aliasConfigValidation.errors);
+  errors.push(...customCaValidation.errors);
   warnings.push(...aliasConfigValidation.warnings);
 
   return {
@@ -368,16 +399,65 @@ function validateRuntimeConfig(input = {}) {
     nodeEnv,
     diagnosticMode: DIAGNOSTIC_MODE,
     logTargets,
+    externalLogSink,
     classRoot: {
       path: classRoot.ok ? classRoot.path : String(env.CMDB_LABELS_CLASS_ROOT_PATH || '').trim(),
       rootName: classRoot.ok ? classRoot.rootName : ''
     },
+    customCa: customCaValidation.summary,
     aliasConfig: {
       source: aliasConfigValidation.source,
       configured: aliasConfigValidation.configured
     },
     errors,
     warnings
+  };
+}
+
+function validateCustomCaConfig(env = process.env) {
+  const mode = normalizeCustomCaMode(env.CMDB_LABELS_CUSTOM_CA_MODE || CUSTOM_CA_MODE);
+  const filePath = cleanValue(env.CMDB_LABELS_CUSTOM_CA_FILE || env.NODE_EXTRA_CA_CERTS || CUSTOM_CA_FILE);
+  const errors = [];
+
+  if (mode === 'none') {
+    return {
+      ok: true,
+      summary: { mode, file: filePath || '', configured: false },
+      errors
+    };
+  }
+
+  if (!filePath) {
+    errors.push({
+      code: 'custom_ca_file_required',
+      env: 'CMDB_LABELS_CUSTOM_CA_FILE',
+      message: 'Custom CA mode requires CMDB_LABELS_CUSTOM_CA_FILE or NODE_EXTRA_CA_CERTS.'
+    });
+  } else {
+    try {
+      const stat = fs.statSync(filePath);
+      if (!stat.isFile()) {
+        errors.push({
+          code: 'custom_ca_file_invalid',
+          env: 'CMDB_LABELS_CUSTOM_CA_FILE',
+          path: filePath,
+          message: 'Custom CA path must point to a certificate file.'
+        });
+      }
+    } catch (error) {
+      errors.push({
+        code: 'custom_ca_file_unreadable',
+        env: 'CMDB_LABELS_CUSTOM_CA_FILE',
+        path: filePath,
+        message: 'Custom CA certificate file is not readable.'
+      });
+    }
+  }
+
+  return {
+    ok: errors.length === 0,
+    summary: { mode, file: filePath, configured: mode !== 'none' },
+    errors
   };
 }
 
@@ -425,7 +505,9 @@ function runtimeConfigSummary(validation = validateRuntimeConfig()) {
     nodeEnv: validation.nodeEnv || 'development',
     diagnosticMode: validation.diagnosticMode,
     logTargets: validation.logTargets,
+    externalLogSink: validation.externalLogSink,
     classRoot: validation.classRoot,
+    customCa: validation.customCa,
     aliasConfig: validation.aliasConfig,
     errors: validation.errors.map((item) => item.code),
     warnings: validation.warnings.map((item) => item.code)
@@ -905,31 +987,40 @@ function buildIdentityPayload(env = process.env, options = {}) {
   const embeddedArtifact = embedded && embedded.runtimeArtifact && typeof embedded.runtimeArtifact === 'object' ?
     embedded.runtimeArtifact :
     {};
-  const expectedRuntimeArtifactSha256 = readRuntimeArtifactSha256(env) !== 'unknown' ?
-    readRuntimeArtifactSha256(env) :
-    cleanValue(embeddedArtifact.expectedSha256 || embeddedArtifact.sha256 || 'unknown').toLowerCase();
+  const embeddedExpectedSha256 = cleanValue(embeddedArtifact.expectedSha256 || embeddedArtifact.sha256 || 'unknown').toLowerCase();
+  const envExpectedSha256 = readRuntimeArtifactSha256(env);
+  const expectedRuntimeArtifactSha256 = SHA256_PATTERN.test(embeddedExpectedSha256) && embeddedExpectedSha256 !== 'unknown' ?
+    embeddedExpectedSha256 :
+    envExpectedSha256;
   const version = readAppVersion(options.versionFilePath || VERSION_FILE_PATH);
-  const buildVersion = APP_VERSION_PATTERN.test(cleanValue(env.CMDB_LABELS_BUILD_VERSION || '')) ?
-    cleanValue(env.CMDB_LABELS_BUILD_VERSION) :
-    (APP_VERSION_PATTERN.test(cleanValue(embedded.buildVersion || '')) ? cleanValue(embedded.buildVersion) : version);
-  const revision = readBuildRevision(env) !== 'unknown' ?
-    readBuildRevision(env) :
-    (BUILD_REVISION_PATTERN.test(cleanValue(embedded.revision || '').toLowerCase()) ? cleanValue(embedded.revision).toLowerCase() : 'unknown');
-  const sourceState = readBuildSourceState(env) === 'verified' ?
-    'verified' :
-    normalizeBuildSourceState(embedded.sourceState);
+  const embeddedBuildVersion = APP_VERSION_PATTERN.test(cleanValue(embedded.buildVersion || '')) ? cleanValue(embedded.buildVersion) : '';
+  const envBuildVersion = APP_VERSION_PATTERN.test(cleanValue(env.CMDB_LABELS_BUILD_VERSION || '')) ? cleanValue(env.CMDB_LABELS_BUILD_VERSION) : '';
+  const buildVersion = embeddedBuildVersion || envBuildVersion || version;
+  const embeddedRevision = BUILD_REVISION_PATTERN.test(cleanValue(embedded.revision || '').toLowerCase()) ?
+    cleanValue(embedded.revision).toLowerCase() :
+    'unknown';
+  const envRevision = readBuildRevision(env);
+  const revision = embeddedRevision !== 'unknown' ? embeddedRevision : envRevision;
+  const buildMode = normalizeBuildMode(embedded.buildMode || env.CMDB_LABELS_BUILD_MODE);
+  const artifactMatchesExpected = expectedRuntimeArtifactSha256 !== 'unknown' && runtimeArtifactSha256 === expectedRuntimeArtifactSha256;
+  const embeddedVerified = normalizeBuildSourceState(embedded.sourceState) === 'verified' &&
+    buildMode === 'canonical' &&
+    buildVersion === version &&
+    /^[0-9a-f]{40}$/.test(revision) &&
+    artifactMatchesExpected;
+  const sourceState = embeddedVerified ? 'verified' : 'unverified-local';
 
   return {
     version,
     buildVersion,
     revision,
     sourceState,
-    buildMode: normalizeBuildMode(env.CMDB_LABELS_BUILD_MODE || embedded.buildMode),
+    buildMode,
     runtimeArtifact: {
       path: path.basename(runtimeArtifactPath),
       sha256: runtimeArtifactSha256,
       expectedSha256: expectedRuntimeArtifactSha256,
-      matchesExpected: expectedRuntimeArtifactSha256 !== 'unknown' && runtimeArtifactSha256 === expectedRuntimeArtifactSha256
+      matchesExpected: artifactMatchesExpected
     }
   };
 }
@@ -1279,6 +1370,10 @@ async function searchCmdbMatches(draft, authToken, labelConfig, context) {
   const fields = [];
   if (draft.inv) fields.push({ field: 'inv', value: draft.inv });
   if (draft.sn) fields.push({ field: 'sn', value: draft.sn });
+  if (draft.lookupKey) {
+    fields.push({ field: 'sn', value: draft.lookupKey, source: 'lookupKey' });
+    fields.push({ field: 'inv', value: draft.lookupKey, source: 'lookupKey' });
+  }
 
   const matches = [];
   const seen = new Set();
@@ -1288,6 +1383,11 @@ async function searchCmdbMatches(draft, authToken, labelConfig, context) {
       if (matches.length >= MAX_MATCHES) return matches;
       const attribute = fieldMapAttributeName(classInfo.fieldMap, key.field);
       if (!attribute) continue;
+      logDiagnostic('Basic', 'labels.search_key', {
+        source: key.source || key.field,
+        field: key.field,
+        className: classInfo.name
+      });
       const cards = await searchClassCards(classInfo, attribute, key.value, authToken, context);
       for (const card of cards) {
         const device = cmdbCardToDevice(card, classInfo, classInfo.fieldMap, {
@@ -1683,8 +1783,43 @@ function injectAppVersion(html, version = readAppVersion()) {
   return String(html).replace(/(<span\s+data-app-version>)[^<]*(<\/span>)/, `$1${version}$2`);
 }
 
+function escapeHtml(value) {
+  return String(value || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+function sanitizeEmail(value) {
+  return cleanValue(value).replace(/[\r\n<>"']/g, '');
+}
+
+function injectFooterConfig(html, config = {}) {
+  const enabled = config.enabled !== false;
+  const title = escapeHtml(config.title || FOOTER_TITLE);
+  const text = escapeHtml(config.text || FOOTER_TEXT);
+  const email = sanitizeEmail(config.email || FOOTER_EMAIL);
+  const subject = cleanValue(config.subject || FOOTER_SUBJECT);
+  const hidden = enabled ? '' : ' hidden';
+  const href = email ? `mailto:${email}?subject=${encodeURIComponent(subject)}` : '';
+  const emailHtml = email && href ? `<a data-footer-email href="${href}">${escapeHtml(email)}</a>` : '';
+
+  return String(html).replace(
+    /<div id="pageFooter" class="page-footer"[\s\S]*?<\/div>\s*<\/div>/,
+    `<div id="pageFooter" class="page-footer"${hidden}>\n    <div class="footer-title" data-footer-title>${title}</div>\n    <div><span data-footer-text>${text}</span>${emailHtml ? ` ${emailHtml}` : ''}</div>\n</div>`
+  );
+}
+
 function serveUi(res) {
-  const html = injectAppVersion(fs.readFileSync(UI_HTML_PATH, 'utf8'));
+  const html = injectFooterConfig(injectAppVersion(fs.readFileSync(UI_HTML_PATH, 'utf8')), {
+    enabled: FOOTER_ENABLED,
+    title: FOOTER_TITLE,
+    text: FOOTER_TEXT,
+    email: FOOTER_EMAIL,
+    subject: FOOTER_SUBJECT
+  });
   sendHtml(res, 200, html);
 }
 
@@ -1923,6 +2058,7 @@ export {
   createServer,
   filterClassesByRoot,
   injectAppVersion,
+  injectFooterConfig,
   isCmdbuildProxyPathAllowed,
   isCmdbuildUiCacheSensitive,
   isJsonContentType,
