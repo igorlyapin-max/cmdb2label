@@ -54,6 +54,9 @@ test('container image declares build provenance args and OCI labels', () => {
 
 test('container image installs CA tooling for customer trust store', () => {
   assert.match(dockerfile, /apt-get\s+install\s+-y\s+--no-install-recommends\s+ca-certificates/);
+  assert.match(dockerfile, /^\s*ARG\s+CMDB_LABELS_EMBED_CUSTOM_CA=optional$/m);
+  assert.match(dockerfile, /CMDB_LABELS_EMBED_CUSTOM_CA=required but certs\/customer-ca has no real \*\.crt or \*\.pem customer CA file/);
+  assert.match(dockerfile, /!\s+-name '\*\.example'/);
   assert.match(dockerfile, /update-ca-certificates/);
 });
 

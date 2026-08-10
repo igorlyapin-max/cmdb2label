@@ -9,6 +9,8 @@ const customerCompose = read('docker-compose.customer.yml');
 const customerCaCompose = read('docker-compose.customer-ca.yml');
 const envExample = read('.env.example');
 const runbook = read('docs/runbook.ru.md');
+const customerCaReadme = read('certs/customer-ca/README.ru.md');
+const customerCaExample = read('certs/customer-ca/customer-ca.crt.example');
 
 check('Dockerfile uses deterministic system user commands', () => {
   assertMatch(dockerfile, /groupadd\s+--system\s+cmdb2label/);
@@ -19,8 +21,17 @@ check('Dockerfile uses deterministic system user commands', () => {
 
 check('Dockerfile has customer CA trust-store hook', () => {
   assertMatch(dockerfile, /apt-get\s+install\s+-y\s+--no-install-recommends\s+ca-certificates/);
+  assertMatch(dockerfile, /^\s*ARG\s+CMDB_LABELS_EMBED_CUSTOM_CA=optional$/m);
   assertMatch(dockerfile, /COPY\s+certs\/customer-ca\s+\/usr\/local\/share\/ca-certificates\/cmdb2label-customer/);
   assertMatch(dockerfile, /update-ca-certificates/);
+  assertMatch(dockerfile, /CMDB_LABELS_EMBED_CUSTOM_CA=required but certs\/customer-ca has no real \*\.crt or \*\.pem customer CA file/);
+  assertMatch(dockerfile, /!\s+-name '\*\.example'/);
+});
+
+check('customer CA source tree has visible contract and safe placeholder', () => {
+  assertMatch(customerCaReadme, /CMDB_LABELS_EMBED_CUSTOM_CA=required/);
+  assertMatch(customerCaReadme, /customer-ca\.crt/);
+  assertMatch(customerCaExample, /PLACEHOLDER-DO-NOT-USE-AS-A-REAL-CERTIFICATE/);
 });
 
 check('customer compose is image-only', () => {
@@ -45,6 +56,7 @@ check('runbook documents customer certificate delivery policy', () => {
   assertMatch(runbook, /NODE_EXTRA_CA_CERTS/);
   assertMatch(runbook, /--insecure/);
   assertMatch(runbook, /docker-compose\.customer\.yml/);
+  assertMatch(runbook, /CMDB_LABELS_EMBED_CUSTOM_CA=required/);
 });
 
 dockerComposeConfig(['-f', 'docker-compose.customer.yml', 'config']);

@@ -78,7 +78,14 @@ CMDB2LABEL_ENV_FILE=.env \
 docker compose -f docker-compose.customer.yml up -d
 ```
 
-Если контур использует private CA, подключайте `docker-compose.customer-ca.yml`; реальные сертификаты заказчика остаются deployment artifacts и не коммитятся.
+Если контур использует private CA, подключайте `docker-compose.customer-ca.yml` для runtime mount или подготовьте embedded CA перед customer-specific build:
+
+```bash
+node scripts/prepare-customer-ca.mjs --source /secure/customer/CheckPoint.crt
+docker build --build-arg CMDB_LABELS_EMBED_CUSTOM_CA=required -t ghcr.io/igorlyapin-max/cmdb2label:<version>-customer-ca .
+```
+
+Реальные сертификаты заказчика остаются deployment artifacts и не коммитятся; contract-файлы лежат в `certs/customer-ca/`.
 
 ## Документация
 

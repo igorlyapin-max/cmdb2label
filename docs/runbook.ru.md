@@ -153,7 +153,7 @@ docker image inspect ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05 \
 
 ## Customer CA / certificates
 
-Реальные сертификаты заказчика являются deployment artifacts. Не коммитьте `*.crt`, `*.pem`, `*.key`, `*.p12`, customer archives и fingerprint-файлы в public source. В репозитории оставлена только структура `certs/customer-ca/`.
+Реальные сертификаты заказчика являются deployment artifacts. Не коммитьте `*.crt`, `*.pem`, `*.key`, `*.p12`, customer archives и fingerprint-файлы в public source. В репозитории оставлены видимые contract-файлы `certs/customer-ca/README.ru.md` и `certs/customer-ca/customer-ca.crt.example`; реальный CA должен быть передан отдельно и подготовлен перед build или mount.
 
 Сертификаты нужны только если контур использует private CA для одного из путей:
 
@@ -188,7 +188,22 @@ NODE_EXTRA_CA_CERTS=/etc/cmdb2label/customer-ca/customer-ca.crt
 
 Backend валидирует, что файл CA существует и читается. Smoke для TLS выполняйте без `--insecure`; использование `--insecure` скрывает проблему trust store и не принимается как delivery evidence.
 
-Embedded mode допускается только для customer-specific immutable image: до `docker build` положите `*.crt` или `*.pem` в ignored каталог `certs/customer-ca/`. Dockerfile копирует этот каталог в trust store image и запускает `update-ca-certificates`. После rotation сертификата пересоберите image, проверьте fingerprint и `/about` identity.
+Embedded mode допускается только для customer-specific immutable image. Подготовьте CA:
+
+```bash
+node scripts/prepare-customer-ca.mjs --source /secure/customer/CheckPoint.crt
+```
+
+Затем соберите image в fail-closed режиме:
+
+```bash
+docker build \
+  --build-arg CMDB_LABELS_EMBED_CUSTOM_CA=required \
+  -t ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05-customer-ca \
+  .
+```
+
+Если `CMDB_LABELS_EMBED_CUSTOM_CA=required`, но в `certs/customer-ca/` нет реального `*.crt` или `*.pem`, Docker build должен завершиться ошибкой. Placeholder `*.example` не считается сертификатом. После rotation сертификата пересоберите image, проверьте fingerprint и `/about` identity.
 
 Registry trust настраивается на Docker host отдельно от приложения. Для private registry администратор должен настроить `docker login`, corporate CA для Docker daemon или registry mirror согласно политике площадки, затем проверить:
 

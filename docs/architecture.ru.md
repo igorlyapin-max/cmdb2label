@@ -144,7 +144,7 @@ Container identity передается через build args `CMDB_LABELS_BUILD
 
 `stdout`/`stderr` обязательны всегда. App-level syslog включается опционально через `CMDB_LABELS_LOG_TARGET=stdout,syslog`; при `CMDB_LABELS_LOG_TARGET=stdout` production config обязан задать `CMDB_LABELS_LOG_EXTERNAL_SINK=platform|collector|sidecar|docker-driver`, чтобы deployment/platform sink был явной частью runtime contract.
 
-Customer CA не является application secret и не хранится в public source. Если `CMDBUILD_ORIGIN` или registry идут через private CA, основной режим - read-only mount сертификата и `NODE_EXTRA_CA_CERTS`. Embedded CA разрешен только для customer-specific image: локально положенные `certs/customer-ca/*.crt`/`*.pem` попадают в Docker build context и добавляются в system trust store.
+Customer CA не является application secret и не хранится в public source. Если `CMDBUILD_ORIGIN` или registry идут через private CA, основной режим - read-only mount сертификата и `NODE_EXTRA_CA_CERTS`. Embedded CA разрешен только для customer-specific image: `scripts/prepare-customer-ca.mjs` кладет реальный CA в ignored `certs/customer-ca/customer-ca.crt`, а Docker build с `CMDB_LABELS_EMBED_CUSTOM_CA=required` fail-closed проверяет наличие реального `*.crt`/`*.pem` и добавляет его в system trust store.
 
 Пример alias/derive config:
 
