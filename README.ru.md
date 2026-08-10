@@ -78,10 +78,12 @@ CMDB2LABEL_ENV_FILE=.env \
 docker compose -f docker-compose.customer.yml up -d
 ```
 
-Если контур использует private CA, подключайте `docker-compose.customer-ca.yml` для runtime mount или подготовьте embedded CA перед customer-specific build. Embedded CA применяется сразу после `FROM`, до `apt-get update`, поэтому подходит и для OS repositories/corporate proxy во время Docker build:
+Если контур использует private CA, подключайте `docker-compose.customer-ca.yml` для runtime mount или подготовьте embedded CA перед customer-specific build. Embedded CA применяется сразу после `FROM`, до `apt-get update`, поэтому подходит и для OS repositories/corporate proxy во время Docker build. APT sources берутся из `apt/debian.sources`; если файл не заменить перед build, используется стандартный Debian repo.
 
 ```bash
 node scripts/prepare-customer-ca.mjs --source /secure/customer/CheckPoint.crt
+mkdir -p apt
+cp /etc/apt/debian.sources apt/debian.sources
 docker build --build-arg CMDB_LABELS_EMBED_CUSTOM_CA=required -t ghcr.io/igorlyapin-max/cmdb2label:<version>-customer-ca .
 ```
 

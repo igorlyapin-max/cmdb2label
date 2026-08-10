@@ -195,6 +195,16 @@ Embedded mode допускается только для customer-specific immut
 node scripts/prepare-customer-ca.mjs --source /secure/customer/CheckPoint.crt
 ```
 
+APT sources берутся из `apt/debian.sources` внутри build context. Если этот файл не заменить перед build, используется стандартный Debian repo (`deb.debian.org`). Для внутреннего mirror/proxy положите файл в проект перед build:
+
+```bash
+mkdir -p apt
+cp /etc/apt/debian.sources apt/debian.sources
+docker build -t cmdb2label .
+```
+
+`COPY apt/debian.sources /etc/apt/sources.list.d/debian.sources` копирует именно `./apt/debian.sources` из проекта, а не файл из host `/etc/apt` напрямую. Не добавляйте credentials в committed APT sources; auth для proxy должен решаться инфраструктурно.
+
 Затем соберите image в fail-closed режиме:
 
 ```bash

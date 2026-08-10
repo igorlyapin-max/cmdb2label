@@ -17,6 +17,8 @@ RUN has_customer_ca=0; \
       for cert in $customer_ca_files; do cat "$cert" >> /etc/ssl/certs/ca-certificates.crt; printf '\n' >> /etc/ssl/certs/ca-certificates.crt; done; \
     fi
 
+COPY apt/debian.sources /etc/apt/sources.list.d/debian.sources
+
 RUN apt-get update \
  && apt-get install -y --no-install-recommends ca-certificates \
  && update-ca-certificates \

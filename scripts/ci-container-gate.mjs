@@ -11,6 +11,7 @@ const envExample = read('.env.example');
 const runbook = read('docs/runbook.ru.md');
 const customerCaReadme = read('certs/customer-ca/README.ru.md');
 const customerCaExample = read('certs/customer-ca/customer-ca.crt.example');
+const aptSources = read('apt/debian.sources');
 
 check('Dockerfile uses deterministic system user commands', () => {
   assertMatch(dockerfile, /groupadd\s+--system\s+cmdb2label/);
@@ -25,9 +26,18 @@ check('Dockerfile has customer CA trust-store hook', () => {
   assertMatch(dockerfile, /COPY\s+certs\/customer-ca\s+\/usr\/local\/share\/ca-certificates\/cmdb2label-customer/);
   assertBefore(dockerfile, 'COPY certs/customer-ca /usr/local/share/ca-certificates/cmdb2label-customer', 'apt-get update');
   assertBefore(dockerfile, 'ca-certificates.crt', 'apt-get update');
+  assertMatch(dockerfile, /COPY\s+apt\/debian\.sources\s+\/etc\/apt\/sources\.list\.d\/debian\.sources/);
+  assertBefore(dockerfile, 'COPY apt/debian.sources /etc/apt/sources.list.d/debian.sources', 'apt-get update');
   assertMatch(dockerfile, /update-ca-certificates/);
   assertMatch(dockerfile, /CMDB_LABELS_EMBED_CUSTOM_CA=required but certs\/customer-ca has no real \*\.crt or \*\.pem customer CA file/);
   assertMatch(dockerfile, /!\s+-name '\*\.example'/);
+});
+
+check('APT sources file has visible Debian default contract', () => {
+  assertMatch(aptSources, /URIs:\s+http:\/\/deb\.debian\.org\/debian/);
+  assertMatch(aptSources, /URIs:\s+http:\/\/deb\.debian\.org\/debian-security/);
+  assertMatch(aptSources, /Suites:\s+bookworm bookworm-updates/);
+  assertMatch(aptSources, /Suites:\s+bookworm-security/);
 });
 
 check('customer CA source tree has visible contract and safe placeholder', () => {
@@ -60,6 +70,7 @@ check('runbook documents customer certificate delivery policy', () => {
   assertMatch(runbook, /docker-compose\.customer\.yml/);
   assertMatch(runbook, /CMDB_LABELS_EMBED_CUSTOM_CA=required/);
   assertMatch(runbook, /apt-get update/);
+  assertMatch(runbook, /apt\/debian\.sources/);
 });
 
 dockerComposeConfig(['-f', 'docker-compose.customer.yml', 'config']);

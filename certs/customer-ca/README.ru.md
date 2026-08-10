@@ -1,12 +1,14 @@
 # Customer CA для Docker build
 
-Этот каталог является видимым contract местом для customer CA, который нужно встроить в image trust store. Dockerfile копирует этот каталог сразу после `FROM`, до первого `apt-get update`, поэтому сертификат может использоваться для corporate apt proxy или private OS repositories во время build.
+Этот каталог является видимым contract местом для customer CA, который нужно встроить в image trust store. Dockerfile копирует этот каталог сразу после `FROM`, затем копирует `apt/debian.sources` и только после этого выполняет `apt-get update`, поэтому сертификат может использоваться для corporate apt proxy или private OS repositories во время build. Если `apt/debian.sources` не заменить перед build, используется стандартный Debian repo.
 
 Реальные сертификаты заказчика не коммитятся в git. Перед embedded build положите сюда CA bundle:
 
 ```bash
 cp /secure/customer/CheckPoint.crt certs/customer-ca/customer-ca.crt
 sha256sum certs/customer-ca/customer-ca.crt
+mkdir -p apt
+cp /etc/apt/debian.sources apt/debian.sources
 docker build \
   --build-arg CMDB_LABELS_EMBED_CUSTOM_CA=required \
   -t ghcr.io/igorlyapin-max/cmdb2label:<version>-customer-ca \

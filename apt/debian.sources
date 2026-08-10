@@ -1,0 +1,15 @@
+# Default Debian package repositories for customer source builds.
+# If the customer does not replace this file before `docker build`, the image uses
+# standard Debian Bookworm repositories. To use an internal mirror or corporate
+# apt proxy, replace only the URIs below before build.
+Types: deb
+URIs: http://deb.debian.org/debian
+Suites: bookworm bookworm-updates
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg
+
+Types: deb
+URIs: http://deb.debian.org/debian-security
+Suites: bookworm-security
+Components: main
+Signed-By: /usr/share/keyrings/debian-archive-keyring.gpg

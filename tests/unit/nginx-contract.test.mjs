@@ -7,6 +7,7 @@ const nginxCompose = fs.readFileSync(new URL('../../docker-compose.nginx.yml', i
 const customerCompose = fs.readFileSync(new URL('../../docker-compose.customer.yml', import.meta.url), 'utf8');
 const customerCaCompose = fs.readFileSync(new URL('../../docker-compose.customer-ca.yml', import.meta.url), 'utf8');
 const dockerfile = fs.readFileSync(new URL('../../Dockerfile', import.meta.url), 'utf8');
+const aptSources = fs.readFileSync(new URL('../../apt/debian.sources', import.meta.url), 'utf8');
 const sharedNginxUrl = new URL('../../../cmdbcustompages/nginx/cmdbdynamicpages.conf', import.meta.url);
 const sharedNginxConfig = fs.existsSync(sharedNginxUrl) ? fs.readFileSync(sharedNginxUrl, 'utf8') : '';
 
@@ -66,6 +67,18 @@ test('container image installs CA tooling for customer trust store', () => {
   assert.match(dockerfile, /CMDB_LABELS_EMBED_CUSTOM_CA=required but certs\/customer-ca has no real \*\.crt or \*\.pem customer CA file/);
   assert.match(dockerfile, /!\s+-name '\*\.example'/);
   assert.match(dockerfile, /update-ca-certificates/);
+});
+
+test('container image declares APT sources before package manager network access', () => {
+  assert.match(dockerfile, /^\s*COPY\s+apt\/debian\.sources\s+\/etc\/apt\/sources\.list\.d\/debian\.sources\s*$/m);
+  assert.ok(
+    dockerfile.indexOf('COPY apt/debian.sources /etc/apt/sources.list.d/debian.sources') < dockerfile.indexOf('apt-get update'),
+    'APT sources must be copied before apt-get update'
+  );
+  assert.match(aptSources, /URIs:\s+http:\/\/deb\.debian\.org\/debian/);
+  assert.match(aptSources, /URIs:\s+http:\/\/deb\.debian\.org\/debian-security/);
+  assert.match(aptSources, /Suites:\s+bookworm bookworm-updates/);
+  assert.match(aptSources, /Suites:\s+bookworm-security/);
 });
 
 test('container image uses deterministic non-root system user', () => {
