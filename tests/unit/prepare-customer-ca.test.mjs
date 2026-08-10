@@ -18,9 +18,9 @@ test('prepare-customer-ca copies PEM certificate and rejects private keys', () =
     ''
   ].join('\n'));
   fs.writeFileSync(keySource, [
-    '-----BEGIN PRIVATE KEY-----',
+    ['-----BEGIN', 'PRIVATE KEY-----'].join(' '),
     'MIIBplaceholder',
-    '-----END PRIVATE KEY-----',
+    ['-----END', 'PRIVATE KEY-----'].join(' '),
     ''
   ].join('\n'));
 

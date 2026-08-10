@@ -78,7 +78,7 @@ CMDB2LABEL_ENV_FILE=.env \
 docker compose -f docker-compose.customer.yml up -d
 ```
 
-Если контур использует private CA, подключайте `docker-compose.customer-ca.yml` для runtime mount или подготовьте embedded CA перед customer-specific build:
+Если контур использует private CA, подключайте `docker-compose.customer-ca.yml` для runtime mount или подготовьте embedded CA перед customer-specific build. Embedded CA применяется сразу после `FROM`, до `apt-get update`, поэтому подходит и для OS repositories/corporate proxy во время Docker build:
 
 ```bash
 node scripts/prepare-customer-ca.mjs --source /secure/customer/CheckPoint.crt

@@ -160,6 +160,7 @@ docker image inspect ghcr.io/igorlyapin-max/cmdb2label:00.00.00.05 \
 - private registry или registry mirror;
 - `CMDBUILD_ORIGIN=https://...` с корпоративным/private CA;
 - reverse proxy или corporate proxy с TLS inspection;
+- OS package repositories или корпоративный apt proxy во время Docker build;
 - любой internal HTTPS endpoint, к которому обращается контейнер.
 
 Default mode - runtime mount:
@@ -188,7 +189,7 @@ NODE_EXTRA_CA_CERTS=/etc/cmdb2label/customer-ca/customer-ca.crt
 
 Backend валидирует, что файл CA существует и читается. Smoke для TLS выполняйте без `--insecure`; использование `--insecure` скрывает проблему trust store и не принимается как delivery evidence.
 
-Embedded mode допускается только для customer-specific immutable image. Подготовьте CA:
+Embedded mode допускается только для customer-specific immutable image. В этом режиме Dockerfile копирует `certs/customer-ca` и подключает реальный `*.crt`/`*.pem` сразу после `FROM`, до первого `apt-get update`. Это нужно, если private CA используется не только приложением, но и OS package repositories или корпоративным proxy во время build. Подготовьте CA:
 
 ```bash
 node scripts/prepare-customer-ca.mjs --source /secure/customer/CheckPoint.crt

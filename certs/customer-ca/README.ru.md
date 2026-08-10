@@ -1,6 +1,6 @@
 # Customer CA для Docker build
 
-Этот каталог является видимым contract местом для customer CA, который нужно встроить в image trust store.
+Этот каталог является видимым contract местом для customer CA, который нужно встроить в image trust store. Dockerfile копирует этот каталог сразу после `FROM`, до первого `apt-get update`, поэтому сертификат может использоваться для corporate apt proxy или private OS repositories во время build.
 
 Реальные сертификаты заказчика не коммитятся в git. Перед embedded build положите сюда CA bundle:
 

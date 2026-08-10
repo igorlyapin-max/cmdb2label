@@ -23,6 +23,8 @@ check('Dockerfile has customer CA trust-store hook', () => {
   assertMatch(dockerfile, /apt-get\s+install\s+-y\s+--no-install-recommends\s+ca-certificates/);
   assertMatch(dockerfile, /^\s*ARG\s+CMDB_LABELS_EMBED_CUSTOM_CA=optional$/m);
   assertMatch(dockerfile, /COPY\s+certs\/customer-ca\s+\/usr\/local\/share\/ca-certificates\/cmdb2label-customer/);
+  assertBefore(dockerfile, 'COPY certs/customer-ca /usr/local/share/ca-certificates/cmdb2label-customer', 'apt-get update');
+  assertBefore(dockerfile, 'ca-certificates.crt', 'apt-get update');
   assertMatch(dockerfile, /update-ca-certificates/);
   assertMatch(dockerfile, /CMDB_LABELS_EMBED_CUSTOM_CA=required but certs\/customer-ca has no real \*\.crt or \*\.pem customer CA file/);
   assertMatch(dockerfile, /!\s+-name '\*\.example'/);
@@ -57,6 +59,7 @@ check('runbook documents customer certificate delivery policy', () => {
   assertMatch(runbook, /--insecure/);
   assertMatch(runbook, /docker-compose\.customer\.yml/);
   assertMatch(runbook, /CMDB_LABELS_EMBED_CUSTOM_CA=required/);
+  assertMatch(runbook, /apt-get update/);
 });
 
 dockerComposeConfig(['-f', 'docker-compose.customer.yml', 'config']);
@@ -79,6 +82,14 @@ function assertMatch(text, pattern) {
 
 function assertNoMatch(text, pattern) {
   if (pattern.test(text)) throw new Error(`Forbidden pattern ${pattern} found.`);
+}
+
+function assertBefore(text, left, right) {
+  const leftIndex = text.indexOf(left);
+  const rightIndex = text.indexOf(right);
+  if (leftIndex < 0) throw new Error(`Expected text ${left} not found.`);
+  if (rightIndex < 0) throw new Error(`Expected text ${right} not found.`);
+  if (leftIndex >= rightIndex) throw new Error(`Expected ${left} before ${right}.`);
 }
 
 function dockerComposeConfig(args) {
