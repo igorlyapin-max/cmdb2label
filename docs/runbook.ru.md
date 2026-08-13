@@ -36,6 +36,15 @@ CMDB_LABELS_DIAGNOSTIC_MODE=Verbose npm start
 ```bash
 CMDB_LABELS_LOG_TARGET=stdout
 CMDB_LABELS_LOG_EXTERNAL_SINK=platform
+```
+
+Если заказчик переносит настройки из `.env.example` в свой `.env`, для stdout-only режима нужно переносить обе строки: `CMDB_LABELS_LOG_TARGET=stdout` и `CMDB_LABELS_LOG_EXTERNAL_SINK=platform`. Если указать только `CMDB_LABELS_LOG_TARGET=stdout`, production startup завершится ошибкой `external_log_sink_required`.
+
+`CMDB_LABELS_LOG_EXTERNAL_SINK` не включает дополнительный app-level отправитель логов. Это декларация, что внешний operational sink обеспечен deployment/platform слоем: Docker logging driver, syslog/Fluent Bit/Filebeat sidecar, collector/agent, ELK/OpenSearch pipeline или аналог. Допустимые значения: `platform`, `collector`, `sidecar`, `docker-driver`. Базовый Compose не навязывает конкретный Docker logging driver; его выбирает площадка эксплуатации.
+
+Syslog является опциональной app-level возможностью:
+
+```bash
 CMDB_LABELS_LOG_TARGET=stdout,syslog
 CMDB_LABELS_SYSLOG_HOST=127.0.0.1
 CMDB_LABELS_SYSLOG_PORT=514
@@ -43,9 +52,7 @@ CMDB_LABELS_SYSLOG_PROTOCOL=udp
 CMDB_LABELS_SYSLOG_FACILITY=local0
 ```
 
-Syslog является опциональной app-level возможностью. Если используется `CMDB_LABELS_LOG_TARGET=stdout`, production startup требует `CMDB_LABELS_LOG_EXTERNAL_SINK=platform`, `collector`, `sidecar` или `docker-driver`. Это фиксирует, что внешний operational sink обеспечен deployment/platform слоем: Docker logging driver, syslog/Fluent Bit/Filebeat sidecar, collector/agent, ELK/OpenSearch pipeline или аналог.
-
-Если используется `CMDB_LABELS_LOG_TARGET=stdout,syslog`, backend валидирует `CMDB_LABELS_SYSLOG_HOST`, `CMDB_LABELS_SYSLOG_PORT`, `CMDB_LABELS_SYSLOG_PROTOCOL` и `CMDB_LABELS_SYSLOG_FACILITY` на старте и в readiness.
+Если используется `CMDB_LABELS_LOG_TARGET=stdout,syslog`, backend валидирует `CMDB_LABELS_SYSLOG_HOST`, `CMDB_LABELS_SYSLOG_PORT`, `CMDB_LABELS_SYSLOG_PROTOCOL` и `CMDB_LABELS_SYSLOG_FACILITY` на старте и в readiness. В этом режиме `CMDB_LABELS_LOG_EXTERNAL_SINK` не требуется, потому что syslog является вторым operational sink.
 
 Статус логирования:
 

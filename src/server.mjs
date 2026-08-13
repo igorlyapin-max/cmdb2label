@@ -386,7 +386,7 @@ function validateRuntimeConfig(input = {}) {
     errors.push({
       code: 'external_log_sink_required',
       env: 'CMDB_LABELS_LOG_EXTERNAL_SINK',
-      message: 'Production stdout-only logging requires a documented external platform, collector, sidecar, or docker-driver sink.'
+      message: 'Production stdout-only logging requires CMDB_LABELS_LOG_EXTERNAL_SINK to be one of: platform, collector, sidecar, docker-driver; alternatively use CMDB_LABELS_LOG_TARGET=stdout,syslog with valid syslog settings.'
     });
   }
   errors.push(...integerValidation.errors);
@@ -510,6 +510,11 @@ function runtimeConfigSummary(validation = validateRuntimeConfig()) {
     customCa: validation.customCa,
     aliasConfig: validation.aliasConfig,
     errors: validation.errors.map((item) => item.code),
+    errorDetails: validation.errors.map((item) => ({
+      code: item.code,
+      env: item.env,
+      message: item.message
+    })),
     warnings: validation.warnings.map((item) => item.code)
   };
 }
@@ -1145,7 +1150,7 @@ function readAliasConfigFromEnv(env = process.env) {
           code: 'alias_config_file_unreadable',
           env: 'CMDB_LABELS_ALIAS_CONFIG_FILE',
           path: filePath,
-          message: `Cannot read CMDB labels alias config file: ${error.message}`
+          message: 'Cannot read CMDB labels alias config file.'
         }],
         warnings: []
       };
@@ -1167,7 +1172,7 @@ function readAliasConfigFromEnv(env = process.env) {
       errors: [{
         code: 'alias_config_json_invalid',
         env: source,
-        message: `Invalid CMDB labels alias config JSON: ${error.message}`
+        message: 'Invalid CMDB labels alias config JSON.'
       }],
       warnings: []
     };
@@ -2071,6 +2076,7 @@ export {
   readinessPayload,
   readAppVersion,
   readAliasConfigFromEnv,
+  runtimeConfigSummary,
   renderMetrics,
   resolveDrafts,
   rewriteCmdbuildManifest,

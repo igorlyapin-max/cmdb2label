@@ -1,9 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import crypto from 'node:crypto';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   buildIdentityPayload,
   injectAppVersion,
@@ -13,6 +15,7 @@ import {
   readinessPayload,
   readAliasConfigFromEnv,
   readAppVersion,
+  runtimeConfigSummary,
   validateRuntimeConfig
 } from '../../src/server.mjs';
 
@@ -48,7 +51,43 @@ test('runtime config rejects production stdout-only logging without external sin
   });
 
   assert.equal(result.ok, false);
-  assert.equal(result.errors.some((error) => error.code === 'external_log_sink_required'), true);
+  const error = result.errors.find((item) => item.code === 'external_log_sink_required');
+  assert.ok(error);
+  assert.match(error.message, /CMDB_LABELS_LOG_EXTERNAL_SINK to be one of: platform, collector, sidecar, docker-driver/);
+  assert.match(error.message, /CMDB_LABELS_LOG_TARGET=stdout,syslog/);
+});
+
+test('runtime config summary includes safe error details for startup logs', () => {
+  const result = validateRuntimeConfig({
+    nodeEnv: 'production',
+    csrfSecret: 'stable-test-value',
+    logTargets: ['stdout']
+  });
+  const summary = runtimeConfigSummary(result);
+
+  assert.deepEqual(summary.errors, ['external_log_sink_required']);
+  assert.equal(summary.errorDetails[0].env, 'CMDB_LABELS_LOG_EXTERNAL_SINK');
+  assert.match(summary.errorDetails[0].message, /CMDB_LABELS_LOG_EXTERNAL_SINK to be one of/);
+});
+
+test('runtime config summary does not expose alias config file paths', () => {
+  const filePath = path.join(os.tmpdir(), 'cmdb2label-internal-secret-path', 'aliases.json');
+  const result = validateRuntimeConfig({
+    nodeEnv: 'production',
+    csrfSecret: 'stable-test-value',
+    logTargets: ['stdout'],
+    externalLogSink: 'platform',
+    env: {
+      NODE_ENV: 'production',
+      CMDB_LABELS_CSRF_SECRET: 'stable-test-value',
+      CMDB_LABELS_ALIAS_CONFIG_FILE: filePath
+    }
+  });
+  const summary = runtimeConfigSummary(result);
+
+  assert.deepEqual(summary.errors, ['alias_config_file_unreadable']);
+  assert.equal(summary.errorDetails[0].message, 'Cannot read CMDB labels alias config file.');
+  assert.equal(JSON.stringify(summary.errorDetails).includes(filePath), false);
 });
 
 test('runtime config accepts production stdout logging with platform sink', () => {
@@ -61,6 +100,64 @@ test('runtime config accepts production stdout logging with platform sink', () =
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.errors, []);
+});
+
+test('runtime config accepts production stdout logging with docker driver sink', () => {
+  const result = validateRuntimeConfig({
+    nodeEnv: 'production',
+    csrfSecret: 'stable-test-value',
+    logTargets: ['stdout'],
+    externalLogSink: 'docker-driver'
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.errors, []);
+});
+
+test('runtime config accepts production stdout and syslog without external sink', () => {
+  const result = validateRuntimeConfig({
+    nodeEnv: 'production',
+    csrfSecret: 'stable-test-value',
+    logTargets: ['stdout', 'syslog'],
+    env: {
+      NODE_ENV: 'production',
+      CMDB_LABELS_CSRF_SECRET: 'stable-test-value',
+      CMDB_LABELS_SYSLOG_HOST: '127.0.0.1',
+      CMDB_LABELS_SYSLOG_PORT: '514',
+      CMDB_LABELS_SYSLOG_PROTOCOL: 'udp',
+      CMDB_LABELS_SYSLOG_FACILITY: 'local0'
+    }
+  });
+
+  assert.equal(result.ok, true);
+  assert.deepEqual(result.errors, []);
+});
+
+test('invalid production startup writes config error details and exits', (t) => {
+  const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
+  const result = spawnSync(process.execPath, ['src/server.mjs'], {
+    cwd: repoRoot,
+    env: {
+      ...process.env,
+      NODE_ENV: 'production',
+      CMDB_LABELS_CSRF_SECRET: 'stable-test-value',
+      CMDB_LABELS_LOG_TARGET: 'stdout',
+      CMDB_LABELS_LOG_EXTERNAL_SINK: '',
+      CMDB_LABELS_PORT: '18199'
+    },
+    encoding: 'utf8'
+  });
+  if (result.error && result.error.code === 'EPERM') {
+    t.skip('sandbox blocks child-process startup smoke');
+    return;
+  }
+  const lines = `${result.stdout}\n${result.stderr}`.trim().split('\n').filter(Boolean);
+  const log = JSON.parse(lines.find((line) => line.includes('"event":"app.config_invalid"')));
+
+  assert.equal(result.status, 1);
+  assert.equal(log.event, 'app.config_invalid');
+  assert.deepEqual(log.errors, ['external_log_sink_required']);
+  assert.equal(log.errorDetails[0].env, 'CMDB_LABELS_LOG_EXTERNAL_SINK');
 });
 
 test('runtime config validates syslog config only when syslog target is enabled', () => {
