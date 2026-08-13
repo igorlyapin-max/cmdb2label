@@ -7,7 +7,7 @@
 ```mermaid
 flowchart TB
   subgraph Host["Developer/Test host"]
-    Browser[Browser]
+    Browser[Браузер]
     Nginx[Shared nginx cmdbcustompages<br/>listen 8088]
     Labels[cmdb2label Node.js<br/>listen 127.0.0.1:8094]
     LabelsOnly[optional labels-only nginx<br/>listen 8095]
@@ -18,22 +18,22 @@ flowchart TB
   Browser -->|HTTP 8088 /cmdbuild/| Nginx
   Nginx -->|HTTP 8094 /cmdbuild/labels/*| Labels
   Nginx -->|HTTP 8094 /cmdbuild/custom-api/labels/*| Labels
-  LabelsOnly -->|HTTP 8094 labels routes only| Labels
+  LabelsOnly -->|HTTP 8094 только labels routes| Labels
   Labels -->|HTTP REST 8090| CMDB
   Labels -->|JSON stdout / syslog 514| Logs
 ```
 
-Notes:
+Примечания:
 
-- User-facing dev entrypoint is `http://localhost:8088/cmdbuild/`.
-- Direct CMDBuild upstream `8090` is not a supported user entrypoint for `cmdb2label` custom page routes.
-- Optional `8095` overlay is labels-only and does not own general `/cmdbuild/`.
+- Пользовательская точка входа dev-стенда: `http://localhost:8088/cmdbuild/`.
+- Прямой CMDBuild upstream `8090` не является поддерживаемой пользовательской точкой входа для custom page routes `cmdb2label`.
+- Optional overlay `8095` обслуживает только labels routes и не владеет общим `/cmdbuild/`.
 
 ## Test IT
 
 ```mermaid
 flowchart TB
-  User[User browser]
+  User[Браузер пользователя]
   Ingress[Reverse proxy / ingress<br/>HTTPS 443]
   App[cmdb2label container<br/>HTTP 8094]
   CMDB[CMDBuild REST<br/>HTTP 8090 or HTTPS 443]
@@ -53,18 +53,18 @@ flowchart TB
 
 ## Business Test
 
-Business Test repeats the Test IT logical topology. Differences are deployment-specific:
+Business Test повторяет логическую топологию Test IT. Отличия зависят от развертывания:
 
-- ingress host, TLS certificate, and CMDBuild origin are provided by the platform;
-- `CMDB_LABELS_CSRF_SECRET` must be stable and externally managed;
-- customer alias config and class root must match the Business Test CMDBuild model;
-- if private CA is used, mount it read-only and set `NODE_EXTRA_CA_CERTS`.
+- ingress host, TLS certificate и CMDBuild origin предоставляются платформой;
+- `CMDB_LABELS_CSRF_SECRET` должен быть стабильным и управляться вне приложения;
+- customer alias config и class root должны соответствовать модели CMDBuild в Business Test;
+- если используется private CA, ее нужно смонтировать read-only и задать `NODE_EXTRA_CA_CERTS`.
 
 ## Production
 
 ```mermaid
 flowchart TB
-  User[User browser]
+  User[Браузер пользователя]
   LB[Ingress / Load balancer<br/>HTTPS 443]
   App[cmdb2label image<br/>HTTP 8094 or platform port]
   CMDB[CMDBuild REST<br/>HTTPS 443 or platform port]
@@ -87,10 +87,10 @@ flowchart TB
   Apt -->|HTTP 80 / HTTPS 443 during build| Registry
 ```
 
-Production requirements:
+Требования Production:
 
-- runtime compose uses prebuilt `image:`, not `build:`;
-- base compose does not force a Docker logging driver, collector, or syslog topology;
-- stdout-only production requires `CMDB_LABELS_LOG_EXTERNAL_SINK=platform|collector|sidecar|docker-driver`;
-- direct syslog is optional through `CMDB_LABELS_LOG_TARGET=stdout,syslog`;
-- real customer CA files and fingerprints remain deployment artifacts and are not committed.
+- runtime compose использует готовый `image:`, а не `build:`;
+- base compose не навязывает Docker logging driver, collector или syslog topology;
+- stdout-only production требует `CMDB_LABELS_LOG_EXTERNAL_SINK=platform|collector|sidecar|docker-driver`;
+- прямой syslog опционален через `CMDB_LABELS_LOG_TARGET=stdout,syslog`;
+- реальные customer CA files и fingerprints остаются deployment artifacts и не коммитятся.

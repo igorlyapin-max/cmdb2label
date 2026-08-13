@@ -19,7 +19,7 @@
 
 ## Граница системы
 
-`cmdb2label` - Node.js backend и статический UI для генерации печатных этикеток оборудования из данных CMDBuild. CMDBuild остается источником сессий, пользователей, ролей, карточек и справочников. Browser JavaScript не читает `CMDBuild-Authorization`; backend получает cookie server-side и вызывает CMDBuild REST от имени текущего пользователя.
+`cmdb2label` - Node.js backend и статический UI для генерации печатных этикеток оборудования из данных CMDBuild. CMDBuild остается источником сессий, пользователей, ролей, карточек и справочников. JavaScript в браузере не читает `CMDBuild-Authorization`; backend получает cookie на серверной стороне и вызывает CMDBuild REST от имени текущего пользователя.
 
 Custom page `CmdbLabels` является тонким launcher'ом. Реальные UI/API принадлежат backend-owned маршрутам `/cmdbuild/labels/*` и `/cmdbuild/custom-api/labels/*`.
 
@@ -29,4 +29,4 @@ Custom page `CmdbLabels` является тонким launcher'ом. Реаль
 - Все сетевые соединения указываются с протоколом и портом.
 - Реальные cookies, tokens, пароли, customer CA, fingerprints, private keys и raw payload карточек CMDBuild не включаются в артефакты.
 - `aa/` фиксирует архитектурный контракт; операционные процедуры и команды остаются в `docs/runbook.ru.md`.
-- Kafka/RabbitMQ и прямой SQL-доступ к CMDBuild в текущей версии не используются и зафиксированы как not applicable.
+- Kafka/RabbitMQ и прямой SQL-доступ к CMDBuild в текущей версии не используются и зафиксированы как неприменимые.

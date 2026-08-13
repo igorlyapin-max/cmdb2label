@@ -1,16 +1,16 @@
 openapi: 3.0.3
 info:
   title: cmdb2label API
-  version: 00.00.00.11
+  version: 00.00.00.12
   description: >
-    Backend-owned UI, label API, health, metrics, and diagnostics for CMDBuild
-    label generation. CMDBuild session cookies are consumed server-side; browser
-    JavaScript does not read CMDBuild-Authorization.
+    Backend-owned UI, API этикеток, health, metrics и diagnostics для генерации
+    этикеток CMDBuild. CMDBuild session cookies обрабатываются на серверной
+    стороне; browser JavaScript не читает CMDBuild-Authorization.
 servers:
   - url: http://127.0.0.1:8094
-    description: Local backend
+    description: Локальный backend
   - url: http://localhost:8088
-    description: Local same-origin reverse proxy
+    description: Локальный same-origin reverse proxy
 tags:
   - name: ui
   - name: labels
@@ -24,7 +24,7 @@ paths:
     get:
       tags: [ui]
       security: []
-      summary: Serve label generator UI
+      summary: Отдать UI генератора этикеток
       responses:
         "200":
           description: HTML UI
@@ -35,10 +35,10 @@ paths:
   /cmdbuild/custom-api/labels/session:
     get:
       tags: [labels]
-      summary: Read current CMDBuild session
+      summary: Прочитать текущую CMDBuild session
       responses:
         "200":
-          description: Sanitized CMDBuild session
+          description: Очищенная CMDBuild session
           content:
             application/json:
               schema:
@@ -50,10 +50,10 @@ paths:
   /cmdbuild/custom-api/labels/csrf:
     get:
       tags: [labels]
-      summary: Issue CSRF token for current CMDBuild session
+      summary: Выдать CSRF token для текущей CMDBuild session
       responses:
         "200":
-          description: CSRF token and required header name
+          description: CSRF token и имя обязательного header
           content:
             application/json:
               schema:
@@ -63,10 +63,10 @@ paths:
   /cmdbuild/custom-api/labels/resolve:
     post:
       tags: [labels]
-      summary: Resolve device drafts to printable label rows
+      summary: Преобразовать черновики устройств в строки печатных этикеток
       description: >
-        Requires same-origin Origin or Referer, CMDBuild session cookie, and
-        X-CMDB2Label-CSRF. Backend enriches missing fields through CMDBuild REST.
+        Требует same-origin Origin или Referer, CMDBuild session cookie и
+        X-CMDB2Label-CSRF. Backend обогащает недостающие поля через CMDBuild REST.
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
       requestBody:
@@ -77,7 +77,7 @@ paths:
               $ref: "#/components/schemas/ResolveRequest"
       responses:
         "200":
-          description: All devices resolved
+          description: Все устройства обработаны
           content:
             application/json:
               schema:
@@ -93,7 +93,7 @@ paths:
         "415":
           $ref: "#/components/responses/UnsupportedMediaType"
         "422":
-          description: Request accepted but one or more rows could not be fully resolved
+          description: Запрос принят, но одна или несколько строк не были полностью обработаны
           content:
             application/json:
               schema:
@@ -103,10 +103,10 @@ paths:
   /cmdbuild/custom-api/labels/logging/status:
     get:
       tags: [diagnostics]
-      summary: Read safe logging configuration
+      summary: Прочитать безопасную конфигурацию логирования
       responses:
         "200":
-          description: Safe logging status without secrets
+          description: Безопасный logging status без секретов
           content:
             application/json:
               schema:
@@ -116,7 +116,7 @@ paths:
   /cmdbuild/custom-api/labels/client-log:
     get:
       tags: [diagnostics]
-      summary: Record sanitized client diagnostic event
+      summary: Записать очищенное клиентское диагностическое событие
       parameters:
         - name: stage
           in: query
@@ -132,7 +132,7 @@ paths:
             maxLength: 160
       responses:
         "200":
-          description: Event accepted
+          description: Событие принято
           content:
             application/json:
               schema:
@@ -143,10 +143,10 @@ paths:
     get:
       tags: [health]
       security: []
-      summary: API-prefixed liveness probe
+      summary: Liveness probe с API prefix
       responses:
         "200":
-          description: Backend process is alive
+          description: Процесс backend работает
           content:
             application/json:
               schema:
@@ -155,16 +155,16 @@ paths:
     get:
       tags: [health]
       security: []
-      summary: API-prefixed readiness probe
+      summary: Readiness probe с API prefix
       responses:
         "200":
-          description: Backend is ready
+          description: Backend готов
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadyHealth"
         "503":
-          description: Backend is not ready
+          description: Backend не готов
           content:
             application/json:
               schema:
@@ -173,10 +173,10 @@ paths:
     get:
       tags: [health]
       security: []
-      summary: Safe build identity under API prefix
+      summary: Безопасная build identity под API prefix
       responses:
         "200":
-          description: Safe service identity
+          description: Безопасная identity сервиса
           content:
             application/json:
               schema:
@@ -185,10 +185,10 @@ paths:
     get:
       tags: [health]
       security: []
-      summary: Liveness probe
+      summary: Проверка liveness
       responses:
         "200":
-          description: Backend process is alive
+          description: Процесс backend работает
           content:
             application/json:
               schema:
@@ -197,16 +197,16 @@ paths:
     get:
       tags: [health]
       security: []
-      summary: Readiness probe
+      summary: Проверка readiness
       responses:
         "200":
-          description: Backend is ready
+          description: Backend готов
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ReadyHealth"
         "503":
-          description: Backend is not ready
+          description: Backend не готов
           content:
             application/json:
               schema:
@@ -215,10 +215,10 @@ paths:
     get:
       tags: [health]
       security: []
-      summary: Safe build identity
+      summary: Безопасная build identity
       responses:
         "200":
-          description: Safe service identity
+          description: Безопасная identity сервиса
           content:
             application/json:
               schema:
@@ -227,11 +227,11 @@ paths:
     get:
       tags: [metrics]
       security: []
-      summary: Prometheus metrics
-      description: Should be exposed only to internal/protected monitoring.
+      summary: Метрики Prometheus
+      description: Должен публиковаться только для internal/protected monitoring.
       responses:
         "200":
-          description: Prometheus text exposition
+          description: Текстовый формат Prometheus
           content:
             text/plain; version=0.0.4:
               schema:
@@ -251,37 +251,37 @@ components:
         type: string
   responses:
     BadRequest:
-      description: Invalid request body
+      description: Невалидное тело запроса
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     Unauthorized:
-      description: CMDBuild session is missing or expired
+      description: CMDBuild session отсутствует или истекла
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     Forbidden:
-      description: Same-origin, CSRF, or permission check failed
+      description: Проверка same-origin, CSRF или прав не пройдена
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     PayloadTooLarge:
-      description: Request body or device batch is too large
+      description: Тело запроса или batch устройств слишком большой
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     UnsupportedMediaType:
-      description: Content-Type must be application/json
+      description: Content-Type должен быть application/json
       content:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
     BadGateway:
-      description: CMDBuild upstream is temporarily unavailable
+      description: CMDBuild upstream временно недоступен
       content:
         application/json:
           schema:
@@ -312,7 +312,7 @@ components:
         session:
           type: object
           additionalProperties: true
-          description: Sanitized CMDBuild session object.
+          description: Очищенный объект CMDBuild session.
     CsrfResponse:
       type: object
       required: [ok, token, header]
@@ -338,19 +338,19 @@ components:
       properties:
         inv:
           type: string
-          description: Inventory number.
+          description: Инвентарный номер.
         type:
           type: string
-          description: Device type printed on the label.
+          description: Тип устройства, печатаемый на этикетке.
         model:
           type: string
-          description: Device model.
+          description: Модель устройства.
         sn:
           type: string
-          description: Serial number.
+          description: Серийный номер.
         lookupKey:
           type: string
-          description: Internal one-column CSV lookup key; never printed directly.
+          description: Внутренний lookup key из одноколоночного CSV; напрямую не печатается.
       additionalProperties: true
     LabelDevice:
       type: object
