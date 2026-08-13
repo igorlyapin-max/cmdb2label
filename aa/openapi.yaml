@@ -1,0 +1,452 @@
+openapi: 3.0.3
+info:
+  title: cmdb2label API
+  version: 00.00.00.11
+  description: >
+    Backend-owned UI, label API, health, metrics, and diagnostics for CMDBuild
+    label generation. CMDBuild session cookies are consumed server-side; browser
+    JavaScript does not read CMDBuild-Authorization.
+servers:
+  - url: http://127.0.0.1:8094
+    description: Local backend
+  - url: http://localhost:8088
+    description: Local same-origin reverse proxy
+tags:
+  - name: ui
+  - name: labels
+  - name: health
+  - name: diagnostics
+  - name: metrics
+security:
+  - cmdbuildCookie: []
+paths:
+  /cmdbuild/labels/ui:
+    get:
+      tags: [ui]
+      security: []
+      summary: Serve label generator UI
+      responses:
+        "200":
+          description: HTML UI
+          content:
+            text/html:
+              schema:
+                type: string
+  /cmdbuild/custom-api/labels/session:
+    get:
+      tags: [labels]
+      summary: Read current CMDBuild session
+      responses:
+        "200":
+          description: Sanitized CMDBuild session
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+  /cmdbuild/custom-api/labels/csrf:
+    get:
+      tags: [labels]
+      summary: Issue CSRF token for current CMDBuild session
+      responses:
+        "200":
+          description: CSRF token and required header name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CsrfResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /cmdbuild/custom-api/labels/resolve:
+    post:
+      tags: [labels]
+      summary: Resolve device drafts to printable label rows
+      description: >
+        Requires same-origin Origin or Referer, CMDBuild session cookie, and
+        X-CMDB2Label-CSRF. Backend enriches missing fields through CMDBuild REST.
+      parameters:
+        - $ref: "#/components/parameters/CsrfHeader"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ResolveRequest"
+      responses:
+        "200":
+          description: All devices resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolveResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          description: Request accepted but one or more rows could not be fully resolved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ResolveResponse"
+        "502":
+          $ref: "#/components/responses/BadGateway"
+  /cmdbuild/custom-api/labels/logging/status:
+    get:
+      tags: [diagnostics]
+      summary: Read safe logging configuration
+      responses:
+        "200":
+          description: Safe logging status without secrets
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LoggingStatusResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /cmdbuild/custom-api/labels/client-log:
+    get:
+      tags: [diagnostics]
+      summary: Record sanitized client diagnostic event
+      parameters:
+        - name: stage
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 80
+        - name: message
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 160
+      responses:
+        "200":
+          description: Event accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+  /cmdbuild/custom-api/labels/health/live:
+    get:
+      tags: [health]
+      security: []
+      summary: API-prefixed liveness probe
+      responses:
+        "200":
+          description: Backend process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveHealth"
+  /cmdbuild/custom-api/labels/health/ready:
+    get:
+      tags: [health]
+      security: []
+      summary: API-prefixed readiness probe
+      responses:
+        "200":
+          description: Backend is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyHealth"
+        "503":
+          description: Backend is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyHealth"
+  /cmdbuild/custom-api/labels/about:
+    get:
+      tags: [health]
+      security: []
+      summary: Safe build identity under API prefix
+      responses:
+        "200":
+          description: Safe service identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AboutResponse"
+  /health/live:
+    get:
+      tags: [health]
+      security: []
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Backend process is alive
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LiveHealth"
+  /health/ready:
+    get:
+      tags: [health]
+      security: []
+      summary: Readiness probe
+      responses:
+        "200":
+          description: Backend is ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyHealth"
+        "503":
+          description: Backend is not ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadyHealth"
+  /about:
+    get:
+      tags: [health]
+      security: []
+      summary: Safe build identity
+      responses:
+        "200":
+          description: Safe service identity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AboutResponse"
+  /metrics:
+    get:
+      tags: [metrics]
+      security: []
+      summary: Prometheus metrics
+      description: Should be exposed only to internal/protected monitoring.
+      responses:
+        "200":
+          description: Prometheus text exposition
+          content:
+            text/plain; version=0.0.4:
+              schema:
+                type: string
+components:
+  securitySchemes:
+    cmdbuildCookie:
+      type: apiKey
+      in: cookie
+      name: CMDBuild-Authorization
+  parameters:
+    CsrfHeader:
+      name: X-CMDB2Label-CSRF
+      in: header
+      required: true
+      schema:
+        type: string
+  responses:
+    BadRequest:
+      description: Invalid request body
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Unauthorized:
+      description: CMDBuild session is missing or expired
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    Forbidden:
+      description: Same-origin, CSRF, or permission check failed
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    PayloadTooLarge:
+      description: Request body or device batch is too large
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    UnsupportedMediaType:
+      description: Content-Type must be application/json
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    BadGateway:
+      description: CMDBuild upstream is temporarily unavailable
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+  schemas:
+    OkResponse:
+      type: object
+      required: [ok]
+      properties:
+        ok:
+          type: boolean
+          example: true
+    ErrorResponse:
+      type: object
+      required: [ok, message]
+      properties:
+        ok:
+          type: boolean
+          example: false
+        message:
+          type: string
+    SessionResponse:
+      type: object
+      required: [ok, session]
+      properties:
+        ok:
+          type: boolean
+        session:
+          type: object
+          additionalProperties: true
+          description: Sanitized CMDBuild session object.
+    CsrfResponse:
+      type: object
+      required: [ok, token, header]
+      properties:
+        ok:
+          type: boolean
+        token:
+          type: string
+        header:
+          type: string
+          example: X-CMDB2Label-CSRF
+    ResolveRequest:
+      type: object
+      required: [devices]
+      properties:
+        devices:
+          type: array
+          maxItems: 100
+          items:
+            $ref: "#/components/schemas/DeviceDraft"
+    DeviceDraft:
+      type: object
+      properties:
+        inv:
+          type: string
+          description: Inventory number.
+        type:
+          type: string
+          description: Device type printed on the label.
+        model:
+          type: string
+          description: Device model.
+        sn:
+          type: string
+          description: Serial number.
+        lookupKey:
+          type: string
+          description: Internal one-column CSV lookup key; never printed directly.
+      additionalProperties: true
+    LabelDevice:
+      type: object
+      required: [inv, type, model, sn]
+      properties:
+        inv:
+          type: string
+        type:
+          type: string
+        model:
+          type: string
+        sn:
+          type: string
+    ResolveResponse:
+      type: object
+      required: [ok, devices, errors, meta]
+      properties:
+        ok:
+          type: boolean
+        devices:
+          type: array
+          items:
+            $ref: "#/components/schemas/LabelDevice"
+        errors:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        meta:
+          type: object
+          required: [inputCount, outputCount, cmdbuildRestCalls]
+          properties:
+            inputCount:
+              type: integer
+            outputCount:
+              type: integer
+            cmdbuildRestCalls:
+              type: integer
+    BuildIdentity:
+      type: object
+      required: [version, buildVersion, revision, sourceState, buildMode, runtimeArtifact]
+      properties:
+        version:
+          type: string
+        buildVersion:
+          type: string
+        revision:
+          type: string
+        sourceState:
+          type: string
+          enum: [verified, unverified-local]
+        buildMode:
+          type: string
+          enum: [canonical, manual]
+        runtimeArtifact:
+          type: object
+          additionalProperties: true
+    LiveHealth:
+      type: object
+      required: [service, live, identity]
+      properties:
+        service:
+          type: string
+          example: cmdb2label
+        live:
+          type: boolean
+        identity:
+          $ref: "#/components/schemas/BuildIdentity"
+    ReadyHealth:
+      type: object
+      required: [service, ready]
+      properties:
+        service:
+          type: string
+          example: cmdb2label
+        ready:
+          type: boolean
+        status:
+          type: string
+        identity:
+          $ref: "#/components/schemas/BuildIdentity"
+    AboutResponse:
+      type: object
+      required: [service, identity]
+      properties:
+        service:
+          type: string
+          example: cmdb2label
+        identity:
+          $ref: "#/components/schemas/BuildIdentity"
+    LoggingStatusResponse:
+      type: object
+      required: [ok, logging]
+      properties:
+        ok:
+          type: boolean
+        logging:
+          type: object
+          additionalProperties: true

@@ -91,6 +91,7 @@ docker build --build-arg CMDB_LABELS_EMBED_CUSTOM_CA=required -t ghcr.io/igorlya
 
 ## Документация
 
+- [Архитектурные артефакты](aa/README.md)
 - [Архитектура](docs/architecture.ru.md)
 - [Тестовое окружение](docs/development-environment.ru.md)
 - [Интеграция nginx](docs/nginx-integration.ru.md)
