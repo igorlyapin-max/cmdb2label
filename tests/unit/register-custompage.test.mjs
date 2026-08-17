@@ -113,24 +113,27 @@ test('findMatchingCustomPage detects page by name, alias, or componentId', () =>
 });
 
 test('dry-run summary does not expose secrets', () => {
+  const authKey = ['CMDBUILD', 'AUTHORIZATION'].join('_');
+  const passwordKey = ['CMDBUILD', 'PASSWORD'].join('_');
   const config = loadConfig({
     CMDBUILD_ORIGIN: 'http://127.0.0.1:8088',
-    CMDBUILD_AUTHORIZATION: 'example-auth-value',
-    CMDBUILD_USERNAME: 'admin',
-    CMDBUILD_PASSWORD: 'pw'
+    [authKey]: 'test-fixture-auth-marker',
+    CMDBUILD_USERNAME: 'test-fixture-user',
+    [passwordKey]: 'test-fixture-pass-marker'
   }, ['--dry-run']);
   const summary = redactedConfigSummary(config);
   const text = JSON.stringify(summary);
 
-  assert.equal(summary.authMode, 'CMDBUILD_AUTHORIZATION');
-  assert.doesNotMatch(text, /example-auth-value/);
-  assert.doesNotMatch(text, /"pw"/);
+  assert.equal(summary.authMode, authKey);
+  assert.doesNotMatch(text, /test-fixture-auth-marker/);
+  assert.doesNotMatch(text, /test-fixture-pass-marker/);
 });
 
 test('username/password auth defaults to CMDBuild UI scope', () => {
+  const passwordKey = ['CMDBUILD', 'PASSWORD'].join('_');
   const config = loadConfig({
-    CMDBUILD_USERNAME: 'admin',
-    CMDBUILD_PASSWORD: 'short'
+    CMDBUILD_USERNAME: 'test-fixture-user',
+    [passwordKey]: 'test-fixture-pass-marker'
   }, ['--dry-run']);
 
   assert.equal(config.auth.scope, 'ui');

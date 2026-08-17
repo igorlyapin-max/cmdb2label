@@ -290,6 +290,8 @@ test('static UI exposes fallback app version badge and hides it from print', () 
 
 test('static UI exposes default footer and hides it from print', () => {
   assert.match(html, /id="pageFooter"/);
+  assert.match(html, /id="footerConfig"/);
+  assert.match(html, /function applyFooterConfig\(\)/);
   assert.match(html, /Разработано Департаментом информационных технологий/);
   assert.match(html, /mailto:ritm\.all@gkm\.ru\?subject=/);
   assert.match(html, /@media print[\s\S]*\.page-footer[\s\S]*display: none !important;/);

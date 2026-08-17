@@ -99,6 +99,8 @@ test('customer runtime compose is image-only and custom CA is an explicit overri
 
 test('cmdb2label dev nginx rejects host injection and h2c upgrade forwarding', () => {
   assert.match(nginxConfig, /return\s+444;/);
+  assert.match(nginxConfig, /ASPM: \$host используется только для allowlist\+reject/);
+  assert.match(nginxConfig, /if \(\$host !~ \^\(localhost\|127\\\.0\\\.0\\\.1\)\(:8095\)\?\$\)/);
   assert.match(nginxConfig, /proxy_set_header\s+Host\s+localhost:8095;/);
   assert.match(nginxConfig, /proxy_set_header\s+X-Forwarded-Host\s+localhost:8095;/);
   assert.doesNotMatch(nginxConfig, /\$http_host|\$host;/);

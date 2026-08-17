@@ -10,6 +10,7 @@ import {
   buildIdentityPayload,
   injectAppVersion,
   injectFooterConfig,
+  sanitizeDiagnosticParam,
   normalizeClassRootPath,
   normalizeLogTargets,
   readinessPayload,
@@ -345,11 +346,16 @@ test('app version falls back when VERSION is absent or invalid', () => {
   fs.writeFileSync(invalidPath, '1.2.3\n');
 
   try {
-    assert.equal(readAppVersion(missingPath), '0.0.0.0');
-    assert.equal(readAppVersion(invalidPath), '0.0.0.0');
+    assert.equal(readAppVersion(missingPath), '00.00.00.00');
+    assert.equal(readAppVersion(invalidPath), '00.00.00.00');
   } finally {
     fs.rmSync(invalidPath, { force: true });
   }
+});
+
+test('diagnostic client log params follow OpenAPI-safe pattern', () => {
+  assert.equal(sanitizeDiagnosticParam(' <stage>\r\nok ', 80), 'stageok');
+  assert.equal(sanitizeDiagnosticParam('x'.repeat(200), 160).length, 160);
 });
 
 test('app version reads handoff VERSION format and injects it into UI html', () => {
@@ -367,23 +373,28 @@ test('app version reads handoff VERSION format and injects it into UI html', () 
   }
 });
 
-test('footer config injection escapes text and encodes mailto subject', () => {
+test('footer config injection stores DOM-rendered config as base64url JSON', () => {
   const html = `<div id="pageFooter" class="page-footer">
     <div class="footer-title" data-footer-title>Old</div>
     <div><span data-footer-text>Old:</span> <a data-footer-email href="mailto:old@example.test">old@example.test</a></div>
-</div>`;
+</div>
+<script id="footerConfig" type="application/json" data-footer-config=""></script>`;
   const result = injectFooterConfig(html, {
     enabled: true,
     title: '<DIT>',
     text: 'Пишите сюда:',
-    email: 'ritm.all@gkm.ru',
+    email: 'ritm.all@gkm.ru\r\n<script>',
     subject: 'Предложения по CMDBuild Label'
   });
+  const encoded = result.match(/data-footer-config="([^"]+)"/)[1];
+  const config = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
 
-  assert.match(result, /&lt;DIT&gt;/);
-  assert.match(result, /Пишите сюда:/);
-  assert.match(result, /mailto:ritm\.all@gkm\.ru\?subject=%D0%9F%D1%80/);
+  assert.equal(config.title, '<DIT>');
+  assert.equal(config.text, 'Пишите сюда:');
+  assert.equal(config.email, 'ritm.all@gkm.ru');
+  assert.equal(config.subject, 'Предложения по CMDBuild Label');
   assert.doesNotMatch(result, /<DIT>/);
+  assert.doesNotMatch(result, /<script>"/);
 });
 
 test('build identity does not promote runtime env provenance to verified', () => {

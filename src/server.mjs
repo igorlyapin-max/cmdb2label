@@ -63,7 +63,7 @@ const ROOT_DIR = path.resolve(path.dirname(new URL(import.meta.url).pathname), '
 const UI_HTML_PATH = process.env.CMDB_LABELS_UI_HTML || path.join(ROOT_DIR, 'cmdb2label.html');
 const VERSION_FILE_PATH = path.join(ROOT_DIR, 'VERSION');
 const BUILD_IDENTITY_FILE_PATH = path.join(ROOT_DIR, 'build-identity.json');
-const APP_VERSION_FALLBACK = '0.0.0.0';
+const APP_VERSION_FALLBACK = '00.00.00.00';
 const APP_VERSION_PATTERN = /^\d{2}\.\d{2}\.\d{2}\.\d{2}$/;
 const BUILD_REVISION_PATTERN = /^[0-9a-f]{40}$|^unknown$/;
 const SHA256_PATTERN = /^[0-9a-f]{64}$|^unknown$/;
@@ -1758,8 +1758,8 @@ async function handleApi(req, res, requestUrl) {
       return;
     }
     logDiagnostic('Basic', 'client.event', {
-      stage: cleanValue(requestUrl.searchParams.get('stage')).slice(0, 80),
-      message: cleanValue(requestUrl.searchParams.get('message')).slice(0, 160)
+      stage: sanitizeDiagnosticParam(requestUrl.searchParams.get('stage'), 80),
+      message: sanitizeDiagnosticParam(requestUrl.searchParams.get('message'), 160)
     });
     sendJson(res, 200, { ok: true });
     return;
@@ -1788,32 +1788,27 @@ function injectAppVersion(html, version = readAppVersion()) {
   return String(html).replace(/(<span\s+data-app-version>)[^<]*(<\/span>)/, `$1${version}$2`);
 }
 
-function escapeHtml(value) {
-  return String(value || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
+function sanitizeEmail(value) {
+  const match = cleanValue(value).match(/[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+/);
+  return match ? match[0] : '';
 }
 
-function sanitizeEmail(value) {
-  return cleanValue(value).replace(/[\r\n<>"']/g, '');
+function sanitizeDiagnosticParam(value, maxLength) {
+  return cleanValue(value).replace(/[\r\n<>]/g, '').slice(0, maxLength);
 }
 
 function injectFooterConfig(html, config = {}) {
-  const enabled = config.enabled !== false;
-  const title = escapeHtml(config.title || FOOTER_TITLE);
-  const text = escapeHtml(config.text || FOOTER_TEXT);
-  const email = sanitizeEmail(config.email || FOOTER_EMAIL);
-  const subject = cleanValue(config.subject || FOOTER_SUBJECT);
-  const hidden = enabled ? '' : ' hidden';
-  const href = email ? `mailto:${email}?subject=${encodeURIComponent(subject)}` : '';
-  const emailHtml = email && href ? `<a data-footer-email href="${href}">${escapeHtml(email)}</a>` : '';
-
+  const payload = {
+    enabled: config.enabled !== false,
+    title: cleanValue(config.title || FOOTER_TITLE),
+    text: cleanValue(config.text || FOOTER_TEXT),
+    email: sanitizeEmail(config.email || FOOTER_EMAIL),
+    subject: cleanValue(config.subject || FOOTER_SUBJECT)
+  };
+  const encoded = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   return String(html).replace(
-    /<div id="pageFooter" class="page-footer"[\s\S]*?<\/div>\s*<\/div>/,
-    `<div id="pageFooter" class="page-footer"${hidden}>\n    <div class="footer-title" data-footer-title>${title}</div>\n    <div><span data-footer-text>${text}</span>${emailHtml ? ` ${emailHtml}` : ''}</div>\n</div>`
+    /(<script id="footerConfig" type="application\/json" data-footer-config=")[^"]*("><\/script>)/,
+    `$1${encoded}$2`
   );
 }
 
@@ -2082,6 +2077,7 @@ export {
   rewriteCmdbuildManifest,
   rewriteCmdbuildUiHtml,
   securityHeaders,
+  sanitizeDiagnosticParam,
   escapePrometheusLabelValue,
   validateRuntimeConfig
 };

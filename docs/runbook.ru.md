@@ -70,7 +70,7 @@ Endpoint проверяет живую CMDBuild session cookie. Без cookie и
 
 - Source of truth: root `VERSION`.
 - Формат файла: `XX.YY.ZZ.NN` плюс trailing newline.
-- Если `VERSION` отсутствует до первого explicit git handoff, UI показывает fallback `0.0.0.0`.
+- Если `VERSION` отсутствует до первого explicit git handoff, статический UI показывает fallback `0.0.0.0`, а backend `/about` и `/health/*` используют sentinel `00.00.00.00`.
 - Не создавайте `VERSION` вручную для локального запуска; файл обновляется в handoff/release workflow вместе с Git tag.
 - Runtime не берет версию из `package.json`, branch name или Git metadata.
 - Docker image должен включать тот же root `VERSION`; иначе контейнер покажет fallback или старую версию.
@@ -96,7 +96,7 @@ CMDB_LABELS_FOOTER_EMAIL=ritm.all@gkm.ru
 CMDB_LABELS_FOOTER_SUBJECT=Предложения по CMDBuild Label
 ```
 
-Footer hidden при печати. Env-значения экранируются server-side; raw HTML в env не поддерживается.
+Footer hidden при печати. Env-значения передаются как base64url JSON в `data-footer-config` и применяются в браузере через DOM API (`textContent`, `href`, `hidden`); raw HTML в env не поддерживается.
 
 Ручная сборка customer image из release tag:
 

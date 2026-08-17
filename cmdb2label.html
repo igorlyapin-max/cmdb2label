@@ -321,8 +321,49 @@
     <div class="footer-title" data-footer-title>Разработано Департаментом информационных технологий</div>
     <div><span data-footer-text>Предложения и замечания направлять на почту:</span> <a data-footer-email href="mailto:ritm.all@gkm.ru?subject=%D0%9F%D1%80%D0%B5%D0%B4%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F%20%D0%BF%D0%BE%20CMDBuild%20Label">ritm.all@gkm.ru</a></div>
 </div>
+<script id="footerConfig" type="application/json" data-footer-config=""></script>
 
 <script>
+function decodeFooterConfig(encoded) {
+    if (!encoded) return null;
+    try {
+        const normalized = String(encoded).replace(/-/g, '+').replace(/_/g, '/');
+        const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=');
+        const bytes = Uint8Array.from(atob(padded), char => char.charCodeAt(0));
+        return JSON.parse(new TextDecoder().decode(bytes));
+    } catch (error) {
+        return null;
+    }
+}
+
+function applyFooterConfig() {
+    const configNode = document.getElementById('footerConfig');
+    const footer = document.getElementById('pageFooter');
+    if (!configNode || !footer) return;
+    const config = decodeFooterConfig(configNode.getAttribute('data-footer-config'));
+    if (!config) return;
+
+    const title = footer.querySelector('[data-footer-title]');
+    const text = footer.querySelector('[data-footer-text]');
+    const email = footer.querySelector('[data-footer-email]');
+    footer.hidden = config.enabled === false;
+    if (title) title.textContent = config.title || '';
+    if (text) text.textContent = config.text || '';
+    if (email) {
+        const address = config.email || '';
+        email.textContent = address;
+        if (address) {
+            email.setAttribute('href', 'mailto:' + encodeURIComponent(address) + '?subject=' + encodeURIComponent(config.subject || ''));
+            email.hidden = false;
+        } else {
+            email.removeAttribute('href');
+            email.hidden = true;
+        }
+    }
+}
+
+applyFooterConfig();
+
 const REQUIRED_FIELDS = ['inv', 'model', 'type', 'sn'];
 const FIELD_LABELS = {
     inv: 'Инв. номер',
