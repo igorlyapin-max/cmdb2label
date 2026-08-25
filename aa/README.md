@@ -17,6 +17,19 @@
 | AsyncAPI применимость | [asyncapi-applicability.md](asyncapi-applicability.md) |
 | Карта доступов Kafka | [kafka-access-map.md](kafka-access-map.md) |
 
+## XLSX delivery maps
+
+Markdown/YAML файлы выше остаются source of truth. XLSX-файлы являются delivery-представлением применимых карт и сформированы из canonical templates `${AA_XLSX_TEMPLATE_DIR:-$HOME/projects/files/aa}`.
+
+| Карта | XLSX | Основание применимости |
+| --- | --- | --- |
+| Карта HealthCheck | [xlsx/healthcheck-map.xlsx](xlsx/healthcheck-map.xlsx) | Есть `/health/live`, `/health/ready`, `/about`, Docker `HEALTHCHECK` и same-origin health aliases |
+| Карта метрик | [xlsx/metrics-map.xlsx](xlsx/metrics-map.xlsx) | Есть `GET /metrics` с Prometheus text format |
+| Карта регистрации событий | [xlsx/event-logging-map.xlsx](xlsx/event-logging-map.xlsx) | Backend пишет structured JSON events в stdout/stderr и optional syslog |
+| Смена секретов | [xlsx/secrets-rotation-map.xlsx](xlsx/secrets-rotation-map.xlsx) | Используются cookie/session, CSRF secret, customer CA, registry/admin credentials и deployment config |
+
+XLSX для Kafka не создается, потому что Kafka/RabbitMQ/async broker exchange не используется; применимость зафиксирована в [kafka-access-map.md](kafka-access-map.md) и [asyncapi-applicability.md](asyncapi-applicability.md). XLSX для file access не создается, потому что network file-share или equivalent file-transfer permission отсутствуют; работа с customer CA описана как certificate artifact в [secrets-map.md](secrets-map.md), а не как файловый обмен между системами.
+
 ## Граница системы
 
 `cmdb2label` - Node.js backend и статический UI для генерации печатных этикеток оборудования из данных CMDBuild. CMDBuild остается источником сессий, пользователей, ролей, карточек и справочников. JavaScript в браузере не читает `CMDBuild-Authorization`; backend получает cookie на серверной стороне и вызывает CMDBuild REST от имени текущего пользователя.
