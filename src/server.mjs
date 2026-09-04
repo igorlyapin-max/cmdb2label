@@ -108,6 +108,38 @@ const httpAgent = new http.Agent({ keepAlive: true, maxSockets: 50, maxFreeSocke
 const httpsAgent = new https.Agent({ keepAlive: true, maxSockets: 50, maxFreeSockets: 10 });
 const catalogCache = new Map();
 const metricCounters = new Map();
+const metricHistograms = new Map();
+const HISTOGRAM_BUCKETS_SECONDS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
+const METRIC_DEFINITIONS = {
+  cmdb2label_http_requests_total: {
+    help: 'HTTP requests by route and status.',
+    type: 'counter'
+  },
+  cmdb2label_http_request_duration_seconds: {
+    help: 'HTTP request duration by route and status.',
+    type: 'histogram'
+  },
+  cmdb2label_cmdbuild_requests_total: {
+    help: 'CMDBuild REST requests by method and status.',
+    type: 'counter'
+  },
+  cmdb2label_cmdbuild_request_duration_seconds: {
+    help: 'CMDBuild REST request duration by method and status.',
+    type: 'histogram'
+  },
+  cmdb2label_cmdbuild_proxy_requests_total: {
+    help: 'Generic CMDBuild proxy requests by method and status.',
+    type: 'counter'
+  },
+  cmdb2label_cmdbuild_proxy_request_duration_seconds: {
+    help: 'Generic CMDBuild proxy request duration by method and status.',
+    type: 'histogram'
+  },
+  cmdb2label_build_info: {
+    help: 'Build identity exposed by cmdb2label.',
+    type: 'gauge'
+  }
+};
 
 let shuttingDown = false;
 
@@ -526,17 +558,77 @@ function incMetric(name, labels = {}) {
   metricCounters.set(key, current);
 }
 
+function observeHistogram(name, seconds, labels = {}) {
+  const safeSeconds = Number.isFinite(seconds) && seconds >= 0 ? seconds : 0;
+  const key = `${name}|${JSON.stringify(Object.entries(labels).sort())}`;
+  const current = metricHistograms.get(key) || {
+    name,
+    labels: Object.fromEntries(Object.entries(labels).sort()),
+    buckets: Object.fromEntries(HISTOGRAM_BUCKETS_SECONDS.map((bucket) => [String(bucket), 0])),
+    count: 0,
+    sum: 0
+  };
+  current.count += 1;
+  current.sum += safeSeconds;
+  for (const bucket of HISTOGRAM_BUCKETS_SECONDS) {
+    if (safeSeconds <= bucket) current.buckets[String(bucket)] += 1;
+  }
+  metricHistograms.set(key, current);
+}
+
+function buildInfoMetric() {
+  const identity = buildIdentityPayload();
+  return {
+    name: 'cmdb2label_build_info',
+    labels: {
+      build_mode: identity.buildMode,
+      revision: identity.revision,
+      source_state: identity.sourceState,
+      version: identity.version
+    },
+    value: 1
+  };
+}
+
 function renderMetrics() {
-  const lines = [
-    '# HELP cmdb2label_http_requests_total HTTP requests by route and status.',
-    '# TYPE cmdb2label_http_requests_total counter'
-  ];
-  for (const item of [...metricCounters.values()].sort((left, right) => left.name.localeCompare(right.name))) {
-    const labels = Object.entries(item.labels || {});
-    const suffix = labels.length ? `{${labels.map(([name, value]) => `${name}="${escapePrometheusLabelValue(value)}"`).join(',')}}` : '';
-    lines.push(`${item.name}${suffix} ${item.value}`);
+  const lines = [];
+  for (const [name, definition] of Object.entries(METRIC_DEFINITIONS)) {
+    lines.push(`# HELP ${name} ${definition.help}`);
+    lines.push(`# TYPE ${name} ${definition.type}`);
+    if (definition.type === 'counter') {
+      for (const item of metricItems(metricCounters, name)) {
+        lines.push(`${item.name}${prometheusLabelSuffix(item.labels)} ${item.value}`);
+      }
+    } else if (definition.type === 'histogram') {
+      for (const item of metricItems(metricHistograms, name)) {
+        for (const bucket of HISTOGRAM_BUCKETS_SECONDS) {
+          lines.push(`${item.name}_bucket${prometheusLabelSuffix({ ...item.labels, le: bucket })} ${item.buckets[String(bucket)] || 0}`);
+        }
+        lines.push(`${item.name}_bucket${prometheusLabelSuffix({ ...item.labels, le: '+Inf' })} ${item.count}`);
+        lines.push(`${item.name}_sum${prometheusLabelSuffix(item.labels)} ${formatMetricNumber(item.sum)}`);
+        lines.push(`${item.name}_count${prometheusLabelSuffix(item.labels)} ${item.count}`);
+      }
+    } else if (name === 'cmdb2label_build_info') {
+      const item = buildInfoMetric();
+      lines.push(`${item.name}${prometheusLabelSuffix(item.labels)} ${item.value}`);
+    }
   }
   return `${lines.join('\n')}\n`;
+}
+
+function metricItems(store, name) {
+  return [...store.values()]
+    .filter((item) => item.name === name)
+    .sort((left, right) => JSON.stringify(left.labels).localeCompare(JSON.stringify(right.labels)));
+}
+
+function prometheusLabelSuffix(labels = {}) {
+  const entries = Object.entries(labels);
+  return entries.length ? `{${entries.map(([name, value]) => `${name}="${escapePrometheusLabelValue(value)}"`).join(',')}}` : '';
+}
+
+function formatMetricNumber(value) {
+  return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(6)));
 }
 
 function escapePrometheusLabelValue(value) {
@@ -544,6 +636,11 @@ function escapePrometheusLabelValue(value) {
     .replace(/\\/g, '\\\\')
     .replace(/\n/g, '\\n')
     .replace(/"/g, '\\"');
+}
+
+function resetMetricsForTests() {
+  metricCounters.clear();
+  metricHistograms.clear();
 }
 
 function securityHeaders(headers = {}) {
@@ -830,6 +927,7 @@ function sanitizeHeaders(headers = {}) {
 }
 
 function cmdbuildRequest(pathname, authToken = '', options = {}) {
+  const startedAt = Date.now();
   const target = new URL(pathname, CMDBUILD_ORIGIN);
   const method = String(options.method || 'GET').toUpperCase();
   const body = options.body === undefined ? null : JSON.stringify(options.body);
@@ -864,13 +962,17 @@ function cmdbuildRequest(pathname, authToken = '', options = {}) {
           }
         }
         const statusCode = res.statusCode || 0;
-        incMetric('cmdb2label_cmdbuild_requests_total', { method, status: statusClass(statusCode) });
+        const labels = { method, status: statusClass(statusCode) };
+        incMetric('cmdb2label_cmdbuild_requests_total', labels);
+        observeHistogram('cmdb2label_cmdbuild_request_duration_seconds', (Date.now() - startedAt) / 1000, labels);
         resolve({ ok: statusCode >= 200 && statusCode < 300, statusCode, headers: res.headers, body: text, json });
       });
     });
     req.on('timeout', () => req.destroy(new Error('CMDBuild request timeout')));
     req.on('error', (error) => {
-      incMetric('cmdb2label_cmdbuild_requests_total', { method, status: 'network' });
+      const labels = { method, status: 'network' };
+      incMetric('cmdb2label_cmdbuild_requests_total', labels);
+      observeHistogram('cmdb2label_cmdbuild_request_duration_seconds', (Date.now() - startedAt) / 1000, labels);
       reject(error);
     });
     if (body !== null) req.write(body);
@@ -1855,6 +1957,7 @@ function proxyToCmdbuild(req, res, requestUrl) {
   const requestId = res.getHeader('x-request-id');
   if (requestId) headers['x-request-id'] = String(requestId);
 
+  const startedAt = Date.now();
   const proxyReq = httpTransportForTarget(target).request({
     protocol: target.protocol,
     hostname: target.hostname,
@@ -1869,10 +1972,12 @@ function proxyToCmdbuild(req, res, requestUrl) {
     const shouldRewriteManifest = isCmdbuildUiManifest(requestUrl.pathname);
     const shouldBuffer = shouldRewriteHtml || shouldRewriteManifest || isCmdbuildUiCacheSensitive(requestUrl.pathname);
 
-    incMetric('cmdb2label_cmdbuild_proxy_requests_total', {
+    const metricLabels = {
       method: req.method || 'GET',
       status: statusClass(proxyRes.statusCode || 0)
-    });
+    };
+    incMetric('cmdb2label_cmdbuild_proxy_requests_total', metricLabels);
+    observeHistogram('cmdb2label_cmdbuild_proxy_request_duration_seconds', (Date.now() - startedAt) / 1000, metricLabels);
 
     if (!shouldBuffer) {
       res.writeHead(proxyRes.statusCode || 502, rewriteProxyResponseHeaders(proxyRes.headers));
@@ -1898,7 +2003,9 @@ function proxyToCmdbuild(req, res, requestUrl) {
 
   proxyReq.on('timeout', () => proxyReq.destroy(new Error('CMDBuild proxy request timeout')));
   proxyReq.on('error', (error) => {
-    incMetric('cmdb2label_cmdbuild_proxy_requests_total', { method: req.method || 'GET', status: 'network' });
+    const metricLabels = { method: req.method || 'GET', status: 'network' };
+    incMetric('cmdb2label_cmdbuild_proxy_requests_total', metricLabels);
+    observeHistogram('cmdb2label_cmdbuild_proxy_request_duration_seconds', (Date.now() - startedAt) / 1000, metricLabels);
     writeLog('error', 'cmdbuild.proxy_failed', {
       method: req.method,
       path: requestUrl.pathname,
@@ -1941,7 +2048,9 @@ function attachRequestLogging(req, res, requestUrl) {
       durationMs: Date.now() - startedAt,
       hasCmdbuildCookie: Boolean(authTokenFromRequest(req))
     };
-    incMetric('cmdb2label_http_requests_total', { route: fields.route, status: statusClass(statusCode) });
+    const metricLabels = { route: fields.route, status: statusClass(statusCode) };
+    incMetric('cmdb2label_http_requests_total', metricLabels);
+    observeHistogram('cmdb2label_http_request_duration_seconds', fields.durationMs / 1000, metricLabels);
     logDiagnostic('Basic', 'http.request.finish', fields);
     if (statusCode >= 500) writeLog('error', 'http.request.finish', fields);
     else if (statusCode >= 400) writeLog('warn', 'http.request.finish', fields);
@@ -2057,6 +2166,7 @@ export {
   buildIdentityPayload,
   createServer,
   filterClassesByRoot,
+  incMetric,
   injectAppVersion,
   injectFooterConfig,
   isCmdbuildProxyPathAllowed,
@@ -2068,9 +2178,11 @@ export {
   normalizeClassRootPath,
   normalizeDiagnosticMode,
   normalizeLogTargets,
+  observeHistogram,
   readinessPayload,
   readAppVersion,
   readAliasConfigFromEnv,
+  resetMetricsForTests,
   runtimeConfigSummary,
   renderMetrics,
   resolveDrafts,
