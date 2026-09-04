@@ -26,6 +26,8 @@
 | IF-007 | Admin CLI/browser | CMDBuild custompages API | `npm run register:custompage` / загрузка через CMDBuild UI | CMDBuild HTTP 8090 или HTTPS 443 | Custom page zip и metadata | Администратор загружает launcher | Admin credentials или session cookie | Не входит в пользовательский поток печати |
 | IF-008 | Build/deployment operator | Docker build/runtime | Dockerfile CA/APT и compose CA mount | Registry HTTPS 443; APT HTTP 80/HTTPS 443; app HTTP 8094 | Image layers, CA bundle, APT sources, runtime env | Build/runtime потребляет артефакты | Customer CA - deployment artifact, не app secret | Реальные certs/fingerprints не коммитятся |
 
+HTTP-контракт публичного API `cmdb2label` описан в `aa/openapi.yaml`. Используемые endpoint внешнего CMDBuild REST для `IF-004` и `IF-007` описаны отдельно в `aa/openapi/cmdbuild-consumed.openapi.yaml`; файл фиксирует только фактически вызываемые операции, а не весь CMDBuild API.
+
 ## Основные данные
 
 | Объект | Поля | Источник | Использование |

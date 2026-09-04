@@ -9,7 +9,8 @@
 | Описание бизнес-процессов | [business-processes.md](business-processes.md) |
 | Информационная модель | [information-model.md](information-model.md) |
 | Схема развертывания | [deployment.md](deployment.md) |
-| OpenAPI | [openapi.yaml](openapi.yaml) |
+| OpenAPI публичного API cmdb2label | [openapi.yaml](openapi.yaml) |
+| OpenAPI используемых CMDBuild endpoint | [openapi/cmdbuild-consumed.openapi.yaml](openapi/cmdbuild-consumed.openapi.yaml) |
 | Карта HealthCheck | [healthcheck-map.md](healthcheck-map.md) |
 | Карта метрик | [metrics-map.md](metrics-map.md) |
 | Карта секретов | [secrets-map.md](secrets-map.md) |
@@ -41,5 +42,6 @@ Custom page `CmdbLabels` является тонким launcher'ом. Реаль
 - Информационные потоки имеют вид `IF-XXX` и являются источником ссылок для карт health, metrics, secrets и events.
 - Все сетевые соединения указываются с протоколом и портом.
 - Реальные cookies, tokens, пароли, customer CA, fingerprints, private keys и raw payload карточек CMDBuild не включаются в артефакты.
+- `aa/openapi.yaml` описывает backend-owned API `cmdb2label`; consumed endpoint внешнего CMDBuild REST описаны отдельно в `aa/openapi/cmdbuild-consumed.openapi.yaml`.
 - `aa/` фиксирует архитектурный контракт; операционные процедуры и команды остаются в `docs/runbook.ru.md`.
 - Kafka/RabbitMQ и прямой SQL-доступ к CMDBuild в текущей версии не используются и зафиксированы как неприменимые.

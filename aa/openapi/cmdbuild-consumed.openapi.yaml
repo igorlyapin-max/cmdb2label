@@ -1,0 +1,477 @@
+openapi: 3.0.3
+info:
+  title: CMDBuild REST API, используемый cmdb2label
+  version: 00.00.00.14
+  description: >
+    Контракт описывает только endpoint CMDBuild REST, которые фактически
+    использует cmdb2label для проверки сессии, поиска карточек оборудования,
+    вывода типа из lookup модели и регистрации custom page launcher. Это не
+    полное описание CMDBuild API. Реальные cookies, tokens, passwords,
+    certificates, fingerprints и production payloads в артефакт не включаются.
+servers:
+  - url: "{cmdbuildOrigin}/cmdbuild"
+    description: >
+      CMDBuild upstream или общий reverse proxy. В dev обычно
+      http://127.0.0.1:8090/cmdbuild или http://localhost:8088/cmdbuild.
+    variables:
+      cmdbuildOrigin:
+        default: http://127.0.0.1:8090
+        description: Origin из CMDBUILD_ORIGIN без завершающего /cmdbuild/services/rest/v3.
+tags:
+  - name: session
+    description: Проверка пользовательской сессии и административный login.
+  - name: catalog
+    description: Загрузка классов и атрибутов для поиска оборудования.
+  - name: cards
+    description: Поиск карточек оборудования по Инв. номеру или SN.
+  - name: lookup
+    description: Получение lookup values для вывода поля Тип из parent lookup модели.
+  - name: custompages
+    description: Регистрация thin launcher custom page в CMDBuild.
+security:
+  - cmdbuildSessionHeader: []
+paths:
+  /services/rest/v3/sessions/current:
+    get:
+      tags: [session]
+      x-aa-flow-id: IF-004
+      summary: Проверить текущую CMDBuild session
+      description: >
+        Используется backend для `/cmdbuild/custom-api/labels/session` и
+        readiness. В пользовательском потоке backend пересылает
+        `CMDBuild-Authorization` server-side из HttpOnly cookie; browser
+        JavaScript cookie не читает.
+      responses:
+        "200":
+          description: Сессия активна; cmdb2label использует только безопасные поля пользователя/роли.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbDataObjectResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "5XX":
+          $ref: "#/components/responses/UpstreamError"
+  /services/rest/v3/sessions/:
+    post:
+      tags: [session]
+      security: []
+      x-aa-flow-id: IF-007
+      summary: Создать административную session для регистрации custom page
+      description: >
+        Используется только `scripts/register-custompage.mjs`, когда оператор
+        передал `CMDBUILD_USERNAME` и password через безопасный deployment
+        источник. Не входит в пользовательский поток печати этикеток.
+      parameters:
+        - name: ext
+          in: query
+          required: false
+          description: CMDBuild-specific флаг, используемый registration script.
+          schema:
+            type: boolean
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LoginRequest"
+      responses:
+        "200":
+          description: Session создана; token берется из header, cookie или data.
+          headers:
+            CMDBuild-Authorization:
+              description: Session token, если CMDBuild вернул его в header.
+              schema:
+                type: string
+                maxLength: 512
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbDataObjectResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "5XX":
+          $ref: "#/components/responses/UpstreamError"
+  /services/rest/v3/classes:
+    get:
+      tags: [catalog]
+      x-aa-flow-id: IF-004
+      summary: Загрузить список доступных классов
+      description: >
+        Backend строит catalog cache per session/config hash. Из ответа
+        используются class `name`/`code`, признаки активности, permission
+        metadata и связи parent/superclass/ancestors для ограничения поиска
+        через `CMDB_LABELS_CLASS_ROOT_PATH`.
+      parameters:
+        - name: limit
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+      responses:
+        "200":
+          description: Список классов, видимых текущему пользователю CMDBuild.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbDataArrayResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "5XX":
+          $ref: "#/components/responses/UpstreamError"
+  /services/rest/v3/classes/{className}:
+    get:
+      tags: [catalog]
+      x-aa-flow-id: IF-004
+      summary: Загрузить root class по имени
+      description: >
+        Используется, когда задан `CMDB_LABELS_CLASS_ROOT_PATH`, чтобы root class
+        попал в catalog даже если `/classes` не вернул его в общем списке.
+      parameters:
+        - $ref: "#/components/parameters/ClassName"
+      responses:
+        "200":
+          description: Metadata класса.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbDataObjectResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Root class не найден или недоступен пользователю.
+        "5XX":
+          $ref: "#/components/responses/UpstreamError"
+  /services/rest/v3/classes/{className}/attributes:
+    get:
+      tags: [catalog]
+      x-aa-flow-id: IF-004
+      summary: Загрузить attributes класса
+      description: >
+        Backend сопоставляет CMDBuild attributes с внутренними полями этикетки
+        через alias config: `inv`, `model`, `type`, `sn`. Metadata lookup
+        атрибута модели используется для вывода `Тип` из parent lookup.
+      parameters:
+        - $ref: "#/components/parameters/ClassName"
+        - name: limit
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Attributes класса, видимые текущему пользователю.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbDataArrayResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Класс не найден или attributes недоступны.
+        "5XX":
+          $ref: "#/components/responses/UpstreamError"
+  /services/rest/v3/classes/{className}/cards:
+    get:
+      tags: [cards]
+      x-aa-flow-id: IF-004
+      summary: Найти карточки оборудования
+      description: >
+        Backend ищет карточки по `Инв. номеру` или `SN`. Основной запрос
+        использует CMDBuild filter equality; при 400/404 выполняется
+        ограниченный fallback: чтение небольшой страницы cards и сравнение
+        display value на стороне backend.
+      parameters:
+        - $ref: "#/components/parameters/ClassName"
+        - name: limit
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+        - name: filter
+          in: query
+          required: false
+          description: JSON filter equality по найденному attribute.
+          schema:
+            type: string
+            maxLength: 4096
+        - name: attributes
+          in: query
+          required: false
+          description: Список attributes, нужных для строки этикетки.
+          schema:
+            type: string
+            maxLength: 2048
+      responses:
+        "200":
+          description: Карточки оборудования, доступные пользователю.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbDataArrayResponse"
+        "400":
+          description: Filter не поддержан конкретной версией CMDBuild; backend использует fallback.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Класс или endpoint cards недоступен; backend использует fallback только для ожидаемых случаев.
+        "5XX":
+          $ref: "#/components/responses/UpstreamError"
+  /services/rest/v3/lookup_types/{lookupType}/values:
+    get:
+      tags: [lookup]
+      x-aa-flow-id: IF-004
+      summary: Получить values lookup типа
+      description: >
+        Используется для вывода `Тип` на этикетке из parent lookup значения
+        модели. Если parent уже пришел inline в card value, дополнительный
+        запрос может не понадобиться.
+      parameters:
+        - name: lookupType
+          in: path
+          required: true
+          description: Lookup type из metadata атрибута модели или `parentLookupType`.
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+        - name: limit
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+      responses:
+        "200":
+          description: Значения lookup типа.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbDataArrayResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Lookup type не найден; backend оставит `Тип` незаполненным и вернет validation error строки.
+        "5XX":
+          $ref: "#/components/responses/UpstreamError"
+  /services/rest/v3/custompages:
+    get:
+      tags: [custompages]
+      x-aa-flow-id: IF-007
+      summary: Найти существующую custom page
+      description: >
+        `scripts/register-custompage.mjs` ищет уже зарегистрированный
+        `CmdbLabels` по name, alias или componentId перед update.
+      parameters:
+        - name: limit
+          in: query
+          required: true
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 1000
+        - name: detailed
+          in: query
+          required: false
+          schema:
+            type: boolean
+      responses:
+        "200":
+          description: Список custom pages.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbDataArrayResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "5XX":
+          $ref: "#/components/responses/UpstreamError"
+    post:
+      tags: [custompages]
+      x-aa-flow-id: IF-007
+      summary: Зарегистрировать custom page launcher
+      description: >
+        Загружает zip с thin launcher `CmdbLabels`. В multipart part `data`
+        передаются metadata, а в `file` - zip artifact. Browser flow печати не
+        вызывает этот endpoint.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/CustomPageUploadRequest"
+      responses:
+        "200":
+          description: Custom page создана.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbDataObjectResponse"
+        "201":
+          description: Custom page создана.
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "5XX":
+          $ref: "#/components/responses/UpstreamError"
+  /services/rest/v3/custompages/{customPageId}:
+    put:
+      tags: [custompages]
+      x-aa-flow-id: IF-007
+      summary: Обновить существующую custom page
+      description: >
+        Используется registration script, если существующая custom page найдена.
+        Если конкретная версия CMDBuild не поддерживает update ресурса, скрипт
+        завершится ошибкой без удаления существующей страницы.
+      parameters:
+        - name: customPageId
+          in: path
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 256
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/CustomPageUploadRequest"
+      responses:
+        "200":
+          description: Custom page обновлена.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CmdbDataObjectResponse"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: Custom page не найдена.
+        "5XX":
+          $ref: "#/components/responses/UpstreamError"
+components:
+  securitySchemes:
+    cmdbuildSessionHeader:
+      type: apiKey
+      in: header
+      name: CMDBuild-Authorization
+      description: >
+        Session token передается только backend/admin script. Browser JavaScript
+        не читает и не логирует это значение.
+  parameters:
+    ClassName:
+      name: className
+      in: path
+      required: true
+      description: CMDBuild class name/code, выбранный из catalog.
+      schema:
+        type: string
+        minLength: 1
+        maxLength: 256
+  responses:
+    Unauthorized:
+      description: Session отсутствует, истекла или учетные данные неверны.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CmdbErrorResponse"
+    Forbidden:
+      description: Пользователь не имеет прав на endpoint, класс, карточку или custom page.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CmdbErrorResponse"
+    UpstreamError:
+      description: CMDBuild вернул ошибку upstream или временно недоступен.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/CmdbErrorResponse"
+  schemas:
+    CmdbDataObjectResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        data:
+          type: object
+          additionalProperties: true
+          description: CMDBuild object; cmdb2label использует только разрешенные текущему flow поля.
+    CmdbDataArrayResponse:
+      type: object
+      additionalProperties: true
+      properties:
+        data:
+          type: array
+          maxItems: 10000
+          items:
+            type: object
+            additionalProperties: true
+          description: CMDBuild array или page data; raw production payload не документируется.
+    CmdbErrorResponse:
+      type: object
+      additionalProperties: true
+      description: Ошибка CMDBuild без включения секретов или production payload.
+    LoginRequest:
+      type: object
+      required: [username, password, scope]
+      additionalProperties: false
+      properties:
+        username:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Административный пользователь для registration script.
+        password:
+          type: string
+          minLength: 1
+          maxLength: 1024
+          format: password
+          description: Пароль не логируется и должен поступать из безопасного deployment источника.
+        scope:
+          type: string
+          enum: [ui]
+          description: Registration script использует `ui` scope.
+        role:
+          type: string
+          minLength: 1
+          maxLength: 256
+          description: Optional CMDBuild role для login.
+    CustomPageUploadRequest:
+      type: object
+      required: [data, file]
+      properties:
+        data:
+          type: string
+          maxLength: 4096
+          description: JSON metadata custom page: name, description, alias, componentId, active.
+        file:
+          type: string
+          format: binary
+          description: Zip artifact launcher custom page.

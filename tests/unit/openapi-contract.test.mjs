@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 
 const openapi = fs.readFileSync(new URL('../../aa/openapi.yaml', import.meta.url), 'utf8');
+const cmdbuildConsumedOpenapi = fs.readFileSync(
+  new URL('../../aa/openapi/cmdbuild-consumed.openapi.yaml', import.meta.url),
+  'utf8'
+);
+const aaReadme = fs.readFileSync(new URL('../../aa/README.md', import.meta.url), 'utf8');
 
 test('OpenAPI documents accepted risk only for operational public endpoints', () => {
   const publicPaths = [
@@ -58,6 +63,32 @@ test('OpenAPI response errors include content schemas without response $ref shor
     const block = responseBlock(status);
     assert.match(block, /content:\n\s+application\/json:\n\s+schema:\n\s+\$ref: "#\/components\/schemas\/ErrorResponse"/);
   }
+});
+
+test('AA documents consumed CMDBuild REST endpoints separately from owned API', () => {
+  assert.match(aaReadme, /openapi\/cmdbuild-consumed\.openapi\.yaml/);
+  assert.doesNotMatch(openapi, /cmdbuild-consumed/);
+  assert.match(cmdbuildConsumedOpenapi, /x-aa-flow-id:\s*IF-004/);
+  assert.match(cmdbuildConsumedOpenapi, /x-aa-flow-id:\s*IF-007/);
+
+  for (const path of [
+    '/services/rest/v3/sessions/current',
+    '/services/rest/v3/sessions/',
+    '/services/rest/v3/classes',
+    '/services/rest/v3/classes/{className}',
+    '/services/rest/v3/classes/{className}/attributes',
+    '/services/rest/v3/classes/{className}/cards',
+    '/services/rest/v3/lookup_types/{lookupType}/values',
+    '/services/rest/v3/custompages',
+    '/services/rest/v3/custompages/{customPageId}'
+  ]) {
+    assert.match(cmdbuildConsumedOpenapi, new RegExp(`^  ${escapeRegExp(path)}:`, 'm'), `missing ${path}`);
+  }
+
+  assert.doesNotMatch(cmdbuildConsumedOpenapi, /^  \/services\/rest\/v3\/\*:/m);
+  assert.doesNotMatch(cmdbuildConsumedOpenapi, /admin\/admin|BEGIN CERTIFICATE|password:\s*admin|set-cookie:\s*CMDBuild-Authorization=/i);
+  assert.match(cmdbuildConsumedOpenapi, /Используется backend/);
+  assert.match(cmdbuildConsumedOpenapi, /Регистрация thin launcher custom page/);
 });
 
 function pathBlock(marker) {

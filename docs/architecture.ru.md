@@ -27,6 +27,8 @@ CMDBuild остается источником сессии, пользоват�
 
 Прямой SQL-доступ к базе CMDBuild в v1 не используется.
 
+OpenAPI публичных routes `cmdb2label` находится в `aa/openapi.yaml`. Consumed CMDBuild REST endpoint, которые backend и registration script вызывают как внешнюю систему, описаны отдельно в `aa/openapi/cmdbuild-consumed.openapi.yaml` и связаны с потоками `IF-004` и `IF-007`.
+
 ## Public routes
 
 ```text
