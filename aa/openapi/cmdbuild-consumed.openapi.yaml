@@ -34,7 +34,7 @@ paths:
   /services/rest/v3/sessions/current:
     get:
       tags: [session]
-      x-aa-flow-id: IF-004
+      x-aa-flow-id: OAPI1
       summary: Проверить текущую CMDBuild session
       description: >
         Используется backend для `/cmdbuild/custom-api/labels/session` и
@@ -58,7 +58,7 @@ paths:
     post:
       tags: [session]
       security: []
-      x-aa-flow-id: IF-007
+      x-aa-flow-id: OAPI2
       summary: Создать административную session для регистрации custom page
       description: >
         Используется только `scripts/register-custompage.mjs`, когда оператор
@@ -99,7 +99,7 @@ paths:
   /services/rest/v3/classes:
     get:
       tags: [catalog]
-      x-aa-flow-id: IF-004
+      x-aa-flow-id: OAPI1
       summary: Загрузить список доступных классов
       description: >
         Backend строит catalog cache per session/config hash. Из ответа
@@ -130,7 +130,7 @@ paths:
   /services/rest/v3/classes/{className}:
     get:
       tags: [catalog]
-      x-aa-flow-id: IF-004
+      x-aa-flow-id: OAPI1
       summary: Загрузить root class по имени
       description: >
         Используется, когда задан `CMDB_LABELS_CLASS_ROOT_PATH`, чтобы root class
@@ -155,7 +155,7 @@ paths:
   /services/rest/v3/classes/{className}/attributes:
     get:
       tags: [catalog]
-      x-aa-flow-id: IF-004
+      x-aa-flow-id: OAPI1
       summary: Загрузить attributes класса
       description: >
         Backend сопоставляет CMDBuild attributes с внутренними полями этикетки
@@ -188,7 +188,7 @@ paths:
   /services/rest/v3/classes/{className}/cards:
     get:
       tags: [cards]
-      x-aa-flow-id: IF-004
+      x-aa-flow-id: OAPI1
       summary: Найти карточки оборудования
       description: >
         Backend ищет карточки по `Инв. номеру` или `SN`. Основной запрос
@@ -238,7 +238,7 @@ paths:
   /services/rest/v3/lookup_types/{lookupType}/values:
     get:
       tags: [lookup]
-      x-aa-flow-id: IF-004
+      x-aa-flow-id: OAPI1
       summary: Получить values lookup типа
       description: >
         Используется для вывода `Тип` на этикетке из parent lookup значения
@@ -278,7 +278,7 @@ paths:
   /services/rest/v3/custompages:
     get:
       tags: [custompages]
-      x-aa-flow-id: IF-007
+      x-aa-flow-id: OAPI2
       summary: Найти существующую custom page
       description: >
         `scripts/register-custompage.mjs` ищет уже зарегистрированный
@@ -311,7 +311,7 @@ paths:
           $ref: "#/components/responses/UpstreamError"
     post:
       tags: [custompages]
-      x-aa-flow-id: IF-007
+      x-aa-flow-id: OAPI2
       summary: Зарегистрировать custom page launcher
       description: >
         Загружает zip с thin launcher `CmdbLabels`. В multipart part `data`
@@ -341,7 +341,7 @@ paths:
   /services/rest/v3/custompages/{customPageId}:
     put:
       tags: [custompages]
-      x-aa-flow-id: IF-007
+      x-aa-flow-id: OAPI2
       summary: Обновить существующую custom page
       description: >
         Используется registration script, если существующая custom page найдена.

@@ -39,7 +39,7 @@ Custom page `CmdbLabels` является тонким launcher'ом. Реаль
 
 ## Соглашения
 
-- Информационные потоки имеют вид `IF-XXX` и являются источником ссылок для карт health, metrics, secrets и events.
+- Потоки именуются typed flow IDs без дефиса и padding с prefix `Lx`, `Mx`, `Hx`, `OAPIx`, `AAPIx`, `IFx`. В текущей модели используются `IF0`, `IF1`, `OAPI0`, `OAPI1`, `OAPI2`, `H0`, `M0`, `L0`, `IF2`; эти ID являются источником ссылок для карт health, metrics, secrets, events, OpenAPI/AsyncAPI и XLSX.
 - Все сетевые соединения указываются с протоколом и портом.
 - Реальные cookies, tokens, пароли, customer CA, fingerprints, private keys и raw payload карточек CMDBuild не включаются в артефакты.
 - `aa/openapi.yaml` описывает backend-owned API `cmdb2label`; consumed endpoint внешнего CMDBuild REST описаны отдельно в `aa/openapi/cmdbuild-consumed.openapi.yaml`.

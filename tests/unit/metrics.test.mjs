@@ -141,8 +141,8 @@ test('AA metrics map follows collection contract and catalogue requirements', ()
     assert.match(metricsMap, new RegExp(escapeRegExp(metric)));
   }
 
-  assert.match(metricsMap, /IF-004/);
-  assert.match(metricsMap, /IF-005/);
+  assert.match(metricsMap, /OAPI1/);
+  assert.match(metricsMap, /M0/);
   assert.match(metricsMap, /идентификаторы объектов, имена пользователей, request payloads, тексты ошибок, tokens/);
 });
 

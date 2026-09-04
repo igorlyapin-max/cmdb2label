@@ -25,6 +25,7 @@ paths:
       tags: [ui]
       security: []
       x-aspm-risk-accepted: true
+      x-aa-flow-id: IF1
       summary: Отдать UI генератора этикеток
       description: >
         Публичный same-origin UI route. Не отдает business data, cookies или secrets;
@@ -41,6 +42,7 @@ paths:
   /cmdbuild/custom-api/labels/session:
     get:
       tags: [labels]
+      x-aa-flow-id: OAPI0
       summary: Прочитать текущую CMDBuild session
       responses:
         "200":
@@ -64,6 +66,7 @@ paths:
   /cmdbuild/custom-api/labels/csrf:
     get:
       tags: [labels]
+      x-aa-flow-id: OAPI0
       summary: Выдать CSRF token для текущей CMDBuild session
       responses:
         "200":
@@ -81,6 +84,7 @@ paths:
   /cmdbuild/custom-api/labels/resolve:
     post:
       tags: [labels]
+      x-aa-flow-id: OAPI0
       summary: Преобразовать черновики устройств в строки печатных этикеток
       description: >
         Требует same-origin Origin или Referer, CMDBuild session cookie и
@@ -145,6 +149,7 @@ paths:
   /cmdbuild/custom-api/labels/logging/status:
     get:
       tags: [diagnostics]
+      x-aa-flow-id: OAPI0
       summary: Прочитать безопасную конфигурацию логирования
       responses:
         "200":
@@ -162,6 +167,7 @@ paths:
   /cmdbuild/custom-api/labels/client-log:
     get:
       tags: [diagnostics]
+      x-aa-flow-id: OAPI0
       summary: Записать очищенное клиентское диагностическое событие
       parameters:
         - name: stage
@@ -196,6 +202,7 @@ paths:
       tags: [health]
       security: []
       x-aspm-risk-accepted: true
+      x-aa-flow-id: H0
       summary: Liveness probe с API prefix
       description: >
         Operational endpoint без CMDBuild cookie. Не возвращает business data,
@@ -212,6 +219,7 @@ paths:
       tags: [health]
       security: []
       x-aspm-risk-accepted: true
+      x-aa-flow-id: H0
       summary: Readiness probe с API prefix
       description: >
         Operational endpoint без CMDBuild cookie. Не возвращает business data,
@@ -234,6 +242,7 @@ paths:
       tags: [health]
       security: []
       x-aspm-risk-accepted: true
+      x-aa-flow-id: H0
       summary: Безопасная build identity под API prefix
       description: >
         Operational endpoint без CMDBuild cookie. Возвращает только safe build
@@ -250,6 +259,7 @@ paths:
       tags: [health]
       security: []
       x-aspm-risk-accepted: true
+      x-aa-flow-id: H0
       summary: Проверка liveness
       description: >
         Operational endpoint без CMDBuild cookie. Не возвращает business data,
@@ -266,6 +276,7 @@ paths:
       tags: [health]
       security: []
       x-aspm-risk-accepted: true
+      x-aa-flow-id: H0
       summary: Проверка readiness
       description: >
         Operational endpoint без CMDBuild cookie. Не возвращает business data,
@@ -288,6 +299,7 @@ paths:
       tags: [health]
       security: []
       x-aspm-risk-accepted: true
+      x-aa-flow-id: H0
       summary: Безопасная build identity
       description: >
         Operational endpoint без CMDBuild cookie. Возвращает только safe build
@@ -304,6 +316,7 @@ paths:
       tags: [metrics]
       security: []
       x-aspm-risk-accepted: true
+      x-aa-flow-id: M0
       summary: Метрики Prometheus
       description: >
         Operational endpoint без CMDBuild cookie. Должен публиковаться только

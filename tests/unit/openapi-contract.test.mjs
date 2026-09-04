@@ -68,8 +68,11 @@ test('OpenAPI response errors include content schemas without response $ref shor
 test('AA documents consumed CMDBuild REST endpoints separately from owned API', () => {
   assert.match(aaReadme, /openapi\/cmdbuild-consumed\.openapi\.yaml/);
   assert.doesNotMatch(openapi, /cmdbuild-consumed/);
-  assert.match(cmdbuildConsumedOpenapi, /x-aa-flow-id:\s*IF-004/);
-  assert.match(cmdbuildConsumedOpenapi, /x-aa-flow-id:\s*IF-007/);
+  assert.match(openapi, /x-aa-flow-id:\s*OAPI0/);
+  assert.match(openapi, /x-aa-flow-id:\s*H0/);
+  assert.match(openapi, /x-aa-flow-id:\s*M0/);
+  assert.match(cmdbuildConsumedOpenapi, /x-aa-flow-id:\s*OAPI1/);
+  assert.match(cmdbuildConsumedOpenapi, /x-aa-flow-id:\s*OAPI2/);
 
   for (const path of [
     '/services/rest/v3/sessions/current',
