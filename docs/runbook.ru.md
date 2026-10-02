@@ -20,14 +20,36 @@ curl -fsS http://127.0.0.1:8094/cmdbuild/custom-api/labels/about
 
 ## Diagnostics
 
-Diagnostic mode выключен по умолчанию.
+Diagnostic mode BFF/backend выключен по умолчанию. Для расширенного безопасного логирования включайте `Basic`; `Verbose` используйте только временно на время troubleshooting.
 
 ```bash
 CMDB_LABELS_DIAGNOSTIC_MODE=Basic npm start
 CMDB_LABELS_DIAGNOSTIC_MODE=Verbose npm start
 ```
 
-`Basic` пишет безопасные события без payload. `Verbose` добавляет sanitized request/upstream details, но не должен использоваться постоянно.
+Режимы:
+
+| Значение | Назначение | Production usage |
+| --- | --- | --- |
+| `off` | Diagnostic events выключены | Значение по умолчанию |
+| `Basic` | Расширенные безопасные события BFF: catalog/resolve summaries, request finish diagnostics, sanitized client events | Допустим для диагностики при сохранении штатного structured logging |
+| `Verbose` | Дополнительно пишет sanitized request start/upstream details | Только временно; после диагностики вернуть `off` или `Basic` |
+
+Безопасность diagnostic logs:
+
+- не логируются `Cookie`, `Authorization`, `CMDBuild-Authorization`, `Set-Cookie`, `X-CMDB2Label-CSRF`;
+- не логируются raw CMDBuild payloads, строки этикеток, инвентарные номера, серийные номера и lookup values;
+- `Verbose` не должен использоваться как постоянная production-настройка.
+
+Проверка активной конфигурации BFF:
+
+```bash
+curl -i \
+  -H 'Cookie: CMDBuild-Authorization=<session>' \
+  http://127.0.0.1:8094/cmdbuild/custom-api/labels/logging/status
+```
+
+Endpoint требует живую CMDBuild session cookie и возвращает безопасное состояние логирования: `level`, `format`, `targets`, `diagnostic.mode`, `diagnostic.enabled`, `diagnostic.levels`, redaction headers и, если включен syslog, его sanitized параметры.
 
 ## Logging
 
@@ -54,7 +76,7 @@ CMDB_LABELS_SYSLOG_FACILITY=local0
 
 Если используется `CMDB_LABELS_LOG_TARGET=stdout,syslog`, backend валидирует `CMDB_LABELS_SYSLOG_HOST`, `CMDB_LABELS_SYSLOG_PORT`, `CMDB_LABELS_SYSLOG_PROTOCOL` и `CMDB_LABELS_SYSLOG_FACILITY` на старте и в readiness. В этом режиме `CMDB_LABELS_LOG_EXTERNAL_SINK` не требуется, потому что syslog является вторым operational sink.
 
-Статус логирования:
+Статус логирования также используется для проверки `CMDB_LABELS_DIAGNOSTIC_MODE`:
 
 ```bash
 curl -i \

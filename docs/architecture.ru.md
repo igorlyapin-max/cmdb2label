@@ -176,4 +176,4 @@ Backend выбирает CMDBuild attributes по alias priority, а не по �
 
 Lookup derivation читает parent lookup модели. Если CMDBuild metadata атрибута модели отдает `lookupType`, `sourceLookupType` можно не задавать. Если parent id приходит как scalar `parent`, задайте `parentLookupType`, чтобы backend резолвил тип по lookup values.
 
-`Verbose` diagnostics включается только временно. Cookie, auth headers, CSRF token, raw CMDBuild payloads и строки результата не пишутся в логи.
+`Verbose` diagnostics включается только временно. Cookie, auth headers, CSRF token, raw CMDBuild payloads и строки результата не пишутся в логи. Пошаговое включение расширенного логирования BFF и проверка `/cmdbuild/custom-api/labels/logging/status` описаны в `docs/runbook.ru.md`.

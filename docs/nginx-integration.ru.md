@@ -61,6 +61,42 @@ server {
 - Не проксируйте общий `/cmdbuild/` в `cmdb2label`: этот сервис владеет только `/cmdbuild/labels/*` и `/cmdbuild/custom-api/labels/*`.
 - `/metrics` публикуйте только во внутреннем контуре мониторинга или снимайте напрямую с `127.0.0.1:8094`.
 
+## Расширенное логирование BFF
+
+Расширенный diagnostic режим включается в BFF/backend через env, а не через nginx. Для безопасной диагностики используйте `Basic`:
+
+```dotenv
+CMDB_LABELS_DIAGNOSTIC_MODE=Basic
+CMDB_LABELS_LOG_TARGET=stdout
+CMDB_LABELS_LOG_EXTERNAL_SINK=platform
+```
+
+`Verbose` допустим только временно:
+
+```dotenv
+CMDB_LABELS_DIAGNOSTIC_MODE=Verbose
+```
+
+Если площадка собирает только stdout/stderr через Docker logging driver, collector, sidecar, ELK/OpenSearch или аналог, оставляйте `CMDB_LABELS_LOG_TARGET=stdout` и задавайте `CMDB_LABELS_LOG_EXTERNAL_SINK=platform|collector|sidecar|docker-driver`. Если нужен прямой app-level syslog, используйте отдельный режим:
+
+```dotenv
+CMDB_LABELS_LOG_TARGET=stdout,syslog
+CMDB_LABELS_SYSLOG_HOST=127.0.0.1
+CMDB_LABELS_SYSLOG_PORT=514
+CMDB_LABELS_SYSLOG_PROTOCOL=udp
+CMDB_LABELS_SYSLOG_FACILITY=local0
+```
+
+Проверка активного режима выполняется через same-origin API и требует живую CMDBuild session cookie:
+
+```bash
+curl -i \
+  -H 'Cookie: CMDBuild-Authorization=<session>' \
+  https://cmdbuild.example.org/cmdbuild/custom-api/labels/logging/status
+```
+
+Не включайте в nginx access/error log значения `Cookie`, `Authorization`, `CMDBuild-Authorization`, `Set-Cookie` и `X-CMDB2Label-CSRF`. Даже в `Verbose` BFF не должен писать raw CMDBuild payloads и строки этикеток.
+
 ## Smoke checks
 
 ```bash
