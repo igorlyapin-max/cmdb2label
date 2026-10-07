@@ -398,6 +398,92 @@ test('resolveDrafts classRootPath empty override scans all classes from env-root
   }
 });
 
+test('resolveDrafts searches child class by inherited superclass serial attribute', async () => {
+  const calls = [];
+  const result = await resolveDrafts([{ sn: 'SN-INHERITED' }], 'auth-inherited-sn', mergeLabelConfig(), {
+    classRootPath: '/classes/ZabbixMonitoring',
+    cmdbuildRequest: recordingCmdbuildRequest(calls, inheritedAttributesCmdbuildRequest)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0]._sourceClass, 'CustomerDevice');
+  assert.equal(result.devices[0].sn, 'SN-INHERITED');
+  assert.equal(result.devices[0].model, 'HP 1111');
+  assert.equal(result.devices[0].type, 'Printer');
+  assert.equal(calls.some((pathname) => {
+    const requestUrl = new URL(pathname, 'http://cmdbuild.local');
+    return decodeURIComponent(requestUrl.pathname).endsWith('/classes/CustomerDevice/cards') &&
+      (requestUrl.searchParams.get('filter') || '').includes('"attribute":"sn"');
+  }), true);
+  assert.equal(calls.some((pathname) => {
+    const requestUrl = new URL(pathname, 'http://cmdbuild.local');
+    return decodeURIComponent(requestUrl.pathname).endsWith('/classes/CustomerDevice/cards') &&
+      (requestUrl.searchParams.get('filter') || '').includes('brlSN');
+  }), false);
+});
+
+test('resolveDrafts lets child serial attribute override inherited serial attribute', async () => {
+  const calls = [];
+  const result = await resolveDrafts([{ sn: 'SN-CHILD' }], 'auth-child-sn', mergeLabelConfig(), {
+    classRootPath: '/classes/ZabbixMonitoring',
+    cmdbuildRequest: recordingCmdbuildRequest(calls, inheritedAttributesCmdbuildRequest)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0]._sourceClass, 'ChildOverrideDevice');
+  assert.equal(result.devices[0].sn, 'SN-CHILD');
+  assert.equal(calls.some((pathname) => {
+    const requestUrl = new URL(pathname, 'http://cmdbuild.local');
+    return decodeURIComponent(requestUrl.pathname).endsWith('/classes/ChildOverrideDevice/cards') &&
+      (requestUrl.searchParams.get('filter') || '').includes('"attribute":"sn"');
+  }), true);
+});
+
+test('resolveDrafts protects inherited attribute traversal from superclass cycles', async () => {
+  const result = await resolveDrafts([{ sn: 'SN-LOOP' }], 'auth-cycle-sn', mergeLabelConfig(), {
+    classRootPath: '/classes/ZabbixMonitoring',
+    cmdbuildRequest: inheritedAttributesCmdbuildRequest
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0]._sourceClass, 'LoopDevice');
+  assert.equal(result.devices[0].sn, 'SN-LOOP');
+});
+
+test('resolveDrafts keeps direct parent attributes above distant ancestors', async () => {
+  const calls = [];
+  const result = await resolveDrafts([{ sn: 'SN-ORDER' }], 'auth-ordered-ancestors', mergeLabelConfig(), {
+    classRootPath: '/classes/ZabbixMonitoring',
+    cmdbuildRequest: recordingCmdbuildRequest(calls, inheritedAttributesCmdbuildRequest)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0]._sourceClass, 'OrderedChildDevice');
+  assert.equal(result.devices[0].sn, 'SN-ORDER');
+  assert.equal(calls.some((pathname) => {
+    const requestUrl = new URL(pathname, 'http://cmdbuild.local');
+    return decodeURIComponent(requestUrl.pathname).endsWith('/classes/OrderedChildDevice/cards') &&
+      (requestUrl.searchParams.get('filter') || '').includes('"attribute":"sn"');
+  }), true);
+  assert.equal(calls.some((pathname) => {
+    const requestUrl = new URL(pathname, 'http://cmdbuild.local');
+    return decodeURIComponent(requestUrl.pathname).endsWith('/classes/OrderedChildDevice/cards') &&
+      (requestUrl.searchParams.get('filter') || '').includes('"attribute":"legacySN"');
+  }), false);
+});
+
+test('resolveDrafts caches missing superclass metadata during catalog discovery', async () => {
+  const calls = [];
+  const result = await resolveDrafts([{ sn: 'SN-MISSING-PARENT' }], 'auth-missing-parent-cache', mergeLabelConfig(), {
+    classRootPath: '/classes/ZabbixMonitoring',
+    cmdbuildRequest: recordingCmdbuildRequest(calls, inheritedAttributesCmdbuildRequest)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0]._sourceClass, 'MissingParentChildA');
+  assert.equal(calls.filter((pathname) => decodeURIComponent(new URL(pathname, 'http://cmdbuild.local').pathname).endsWith('/classes/MissingParent')).length, 1);
+});
+
 async function fakeCmdbuildRequest(pathname) {
   return fakeCmdbuildRequestWithCalls(pathname);
 }
@@ -521,6 +607,113 @@ async function splitRootCmdbuildRequest(pathname) {
   }
 
   return fakeCmdbuildRequestWithCalls(pathname);
+}
+
+async function inheritedAttributesCmdbuildRequest(pathname) {
+  const requestUrl = new URL(pathname, 'http://cmdbuild.local');
+  const decodedPath = decodeURIComponent(requestUrl.pathname);
+
+  if (decodedPath === '/cmdbuild/services/rest/v3/classes') {
+    return ok({
+      data: [
+        { name: 'ZabbixMonitoring', active: true, prototype: true },
+        { name: 'BaseDevice', active: true, parent_name: 'ZabbixMonitoring' },
+        { name: 'CustomerDevice', active: true, parent_name: 'BaseDevice', superclass: 'BaseDevice' },
+        { name: 'ChildOverrideDevice', active: true, parent_name: 'BaseDevice', superclass: 'BaseDevice' },
+        { name: 'RootSerialDevice', active: true, parent_name: 'ZabbixMonitoring' },
+        { name: 'ParentSerialDevice', active: true, parent_name: 'RootSerialDevice' },
+        { name: 'OrderedChildDevice', active: true, parent_name: 'ParentSerialDevice', ancestors: [{ name: 'ZabbixMonitoring' }, { name: 'RootSerialDevice' }, { name: 'ParentSerialDevice' }] },
+        { name: 'MissingParentChildA', active: true, parent_name: 'ZabbixMonitoring', superclass: 'MissingParent' },
+        { name: 'MissingParentChildB', active: true, parent_name: 'ZabbixMonitoring', superclass: 'MissingParent' },
+        { name: 'LoopBase', active: true, parent_name: 'ZabbixMonitoring', superclass: 'LoopDevice' },
+        { name: 'LoopDevice', active: true, parent_name: 'LoopBase', superclass: 'LoopBase' }
+      ]
+    });
+  }
+
+  const classMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)$/);
+  if (classMatch) return ok({ data: { name: classMatch[1], active: true } });
+
+  const attributesMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)\/attributes$/);
+  if (attributesMatch) {
+    const attributesByClass = {
+      ZabbixMonitoring: [],
+      BaseDevice: [
+        { name: 'sn', description: 'Серийный номер', type: 'string', active: true }
+      ],
+      CustomerDevice: [
+        { name: 'Code', description: 'Инв. номер', type: 'string', active: true },
+        { name: 'brlSN', description: 'Серийный номер', type: 'string', active: false },
+        { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta', active: true }
+      ],
+      ChildOverrideDevice: [
+        { name: 'Code', description: 'Инв. номер', type: 'string', active: true },
+        { name: 'sn', description: 'Customer serial number', type: 'string', active: true },
+        { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta', active: true }
+      ],
+      RootSerialDevice: [
+        { name: 'legacySN', description: 'Серийный номер', type: 'string', active: true }
+      ],
+      ParentSerialDevice: [
+        { name: 'sn', description: 'Серийный номер', type: 'string', active: true }
+      ],
+      OrderedChildDevice: [
+        { name: 'Code', description: 'Инв. номер', type: 'string', active: true },
+        { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta', active: true }
+      ],
+      MissingParentChildA: [
+        { name: 'Code', description: 'Инв. номер', type: 'string', active: true },
+        { name: 'sn', description: 'Серийный номер', type: 'string', active: true },
+        { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta', active: true }
+      ],
+      MissingParentChildB: [
+        { name: 'Code', description: 'Инв. номер', type: 'string', active: true },
+        { name: 'sn', description: 'Серийный номер', type: 'string', active: true },
+        { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta', active: true }
+      ],
+      LoopBase: [
+        { name: 'sn', description: 'Серийный номер', type: 'string', active: true }
+      ],
+      LoopDevice: [
+        { name: 'Code', description: 'Инв. номер', type: 'string', active: true },
+        { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta', active: true }
+      ]
+    };
+    return ok({ data: attributesByClass[attributesMatch[1]] || [] });
+  }
+
+  const cardsMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)\/cards$/);
+  if (cardsMatch) {
+    const className = cardsMatch[1];
+    const filter = requestUrl.searchParams.get('filter') || '';
+    const parsedFilter = filter ? JSON.parse(filter) : null;
+    const searchedAttribute = parsedFilter && parsedFilter.attribute && parsedFilter.attribute.simple && parsedFilter.attribute.simple.attribute;
+    const searchedValues = parsedFilter && parsedFilter.attribute && parsedFilter.attribute.simple && parsedFilter.attribute.simple.value;
+    const searchedValue = Array.isArray(searchedValues) ? searchedValues[0] : '';
+    if (className === 'CustomerDevice' && searchedAttribute === 'sn' && searchedValue === 'SN-INHERITED') {
+      return ok({ data: [{ _id: 201, Code: 'INV-INHERITED', sn: 'SN-INHERITED', model: 101, _model_description: 'HP 1111' }] });
+    }
+    if (className === 'ChildOverrideDevice' && searchedAttribute === 'sn' && searchedValue === 'SN-CHILD') {
+      return ok({ data: [{ _id: 202, Code: 'INV-CHILD', sn: 'SN-CHILD', model: 101, _model_description: 'HP 1111' }] });
+    }
+    if (className === 'OrderedChildDevice' && searchedAttribute === 'sn' && searchedValue === 'SN-ORDER') {
+      return ok({ data: [{ _id: 203, Code: 'INV-ORDER', sn: 'SN-ORDER', model: 101, _model_description: 'HP 1111' }] });
+    }
+    if (className === 'MissingParentChildA' && searchedAttribute === 'sn' && searchedValue === 'SN-MISSING-PARENT') {
+      return ok({ data: [{ _id: 204, Code: 'INV-MISSING-A', sn: 'SN-MISSING-PARENT', model: 101, _model_description: 'HP 1111' }] });
+    }
+    if (className === 'LoopDevice' && searchedAttribute === 'sn' && searchedValue === 'SN-LOOP') {
+      return ok({ data: [{ _id: 205, Code: 'INV-LOOP', sn: 'SN-LOOP', model: 101, _model_description: 'HP 1111' }] });
+    }
+    return ok({ data: [] });
+  }
+
+  const lookupMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/lookup_types\/([^/]+)\/values$/);
+  if (lookupMatch) {
+    return ok({ data: lookupValues[lookupMatch[1]] || [] });
+  }
+
+  return notFound();
 }
 
 function ok(json) {

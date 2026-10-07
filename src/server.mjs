@@ -1172,6 +1172,26 @@ function classParentNames(item = {}) {
   ].flatMap(classReferenceNames));
 }
 
+function classDirectParentNames(item = {}) {
+  return uniqueStrings([
+    item.parent,
+    item._parent,
+    item.parent_name,
+    item.parentName,
+    item.parentCode,
+    item.superclass,
+    item.superClass,
+    item._superclass
+  ].flatMap(classReferenceNames));
+}
+
+function classAncestorNames(item = {}) {
+  return uniqueStrings([
+    item.ancestors,
+    item._ancestors
+  ].flatMap(classReferenceNames));
+}
+
 function filterClassesByRoot(classes = [], classRootPath = '') {
   const root = normalizeClassRootPath(classRootPath);
   if (!root.ok || !root.rootName) return classes;
@@ -1352,19 +1372,17 @@ async function loadClassCatalog(authToken, labelConfig, context, classRootPath =
     .filter((item) => item && item.active !== false && (!item.permissions || item.permissions._can_read !== false))
     .slice(0, MAX_CLASSES);
   const rootClass = root.rootName ? await loadRootClass(authToken, root.rootName, context) : null;
-  const rawClasses = filterClassesByRoot(mergeClassLists(listedClasses, rootClass ? [rootClass] : []), classRootPath);
+  const allClasses = mergeClassLists(listedClasses, rootClass ? [rootClass] : []);
+  const classIndex = buildClassIndex(allClasses);
+  const classMetadataCache = new Map();
+  const attributesCache = new Map();
+  const rawClasses = filterClassesByRoot(allClasses, classRootPath);
   const catalog = [];
 
   for (const item of rawClasses) {
     const className = cleanValue(item.name || item.code);
     if (!className) continue;
-    const attrs = await countedCmdbuildRequest(`/cmdbuild/services/rest/v3/classes/${encodeURIComponent(className)}/attributes?limit=1000`, authToken, context);
-    if (!attrs.ok) {
-      logDiagnostic('Basic', 'catalog.attributes_skipped', { className, statusCode: attrs.statusCode });
-      continue;
-    }
-    const attributes = extractCmdbData(attrs.json)
-      .filter((attribute) => attribute && attribute.active !== false && (!attribute.permissions || attribute.permissions._can_read !== false));
+    const attributes = await loadEffectiveClassAttributes(item, authToken, context, classIndex, classMetadataCache, attributesCache);
     const fieldMap = buildFieldMap(attributes, aliases);
     const fieldMeta = buildFieldMetadataMap(attributes, aliases);
     logDiagnostic('Basic', 'catalog.class_mapped', {
@@ -1393,6 +1411,109 @@ async function loadClassCatalog(authToken, labelConfig, context, classRootPath =
     searchableClasses: catalog.length
   });
   return catalog;
+}
+
+function buildClassIndex(classes = []) {
+  const index = new Map();
+  for (const item of classes) {
+    for (const name of classIdentifierNames(item)) {
+      if (!index.has(name)) index.set(name, item);
+    }
+  }
+  return index;
+}
+
+function attributeIdentifier(attribute = {}) {
+  return cleanValue(attribute.name || attribute.code || attribute.Code || attribute._name || attribute._code);
+}
+
+function mergeAttributesByIdentifier(...attributeLists) {
+  const result = [];
+  const positions = new Map();
+  for (const attribute of attributeLists.flat()) {
+    const key = attributeIdentifier(attribute);
+    if (!key) continue;
+    if (positions.has(key)) {
+      result[positions.get(key)] = attribute;
+    } else {
+      positions.set(key, result.length);
+      result.push(attribute);
+    }
+  }
+  return result;
+}
+
+async function loadClassMetadata(className, authToken, context, classIndex, classMetadataCache) {
+  const name = cleanValue(className);
+  if (!name) return null;
+  if (classIndex.has(name)) return classIndex.get(name);
+  if (classMetadataCache.has(name)) return classMetadataCache.get(name);
+
+  const promise = loadRootClass(authToken, name, context)
+    .then((loaded) => {
+      if (!loaded) return null;
+      for (const alias of classIdentifierNames(loaded)) {
+        if (!classIndex.has(alias)) classIndex.set(alias, loaded);
+        if (!classMetadataCache.has(alias)) classMetadataCache.set(alias, loaded);
+      }
+      return loaded;
+    })
+    .catch((error) => {
+      classMetadataCache.delete(name);
+      throw error;
+    });
+  classMetadataCache.set(name, promise);
+  const loaded = await promise;
+  if (!loaded) return null;
+  for (const alias of classIdentifierNames(loaded)) {
+    if (!classIndex.has(alias)) classIndex.set(alias, loaded);
+  }
+  return loaded;
+}
+
+async function loadOwnClassAttributes(className, authToken, context, attributesCache) {
+  const name = cleanValue(className);
+  if (!name) return [];
+  if (attributesCache.has(name)) return attributesCache.get(name);
+
+  const promise = countedCmdbuildRequest(`/cmdbuild/services/rest/v3/classes/${encodeURIComponent(name)}/attributes?limit=1000`, authToken, context)
+    .then((attrs) => {
+      if (!attrs.ok) {
+        logDiagnostic('Basic', 'catalog.attributes_skipped', { className: name, statusCode: attrs.statusCode });
+        return [];
+      }
+      return extractCmdbData(attrs.json)
+        .filter((attribute) => attribute && attribute.active !== false && (!attribute.permissions || attribute.permissions._can_read !== false));
+    })
+    .catch((error) => {
+      attributesCache.delete(name);
+      throw error;
+    });
+  attributesCache.set(name, promise);
+  return promise;
+}
+
+async function loadEffectiveClassAttributes(item, authToken, context, classIndex, classMetadataCache, attributesCache, visiting = new Set()) {
+  const className = cleanValue(item && (item.name || item.code));
+  if (!className || visiting.has(className)) return [];
+  visiting.add(className);
+
+  const parentAttributes = [];
+  for (const parentName of effectiveInheritanceParentNames(item)) {
+    const parent = await loadClassMetadata(parentName, authToken, context, classIndex, classMetadataCache);
+    if (!parent) continue;
+    parentAttributes.push(...await loadEffectiveClassAttributes(parent, authToken, context, classIndex, classMetadataCache, attributesCache, visiting));
+  }
+
+  const ownAttributes = await loadOwnClassAttributes(className, authToken, context, attributesCache);
+  visiting.delete(className);
+  return mergeAttributesByIdentifier(parentAttributes, ownAttributes);
+}
+
+function effectiveInheritanceParentNames(item = {}) {
+  const direct = classDirectParentNames(item);
+  if (direct.length) return direct;
+  return classAncestorNames(item);
 }
 
 async function resolveDrafts(drafts, authToken, labelConfig, options = {}) {
