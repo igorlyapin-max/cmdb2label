@@ -322,6 +322,17 @@ test('filterClassesByRoot supports documented CMDBuild parent metadata shapes', 
   ]);
 });
 
+test('filterClassesByRoot does not treat parent description as class identifier', () => {
+  const classes = [
+    { name: 'ZabbixMonitoring', description: 'Zabbix Monitoring' },
+    { name: 'DisplayOnlyParent', parent: { description: 'Zabbix Monitoring' } }
+  ];
+
+  assert.deepEqual(filterClassesByRoot(classes, '/classes/ZabbixMonitoring').map((item) => item.name), [
+    'ZabbixMonitoring'
+  ]);
+});
+
 test('resolveDrafts limits class discovery to configured root subtree', async () => {
   const calls = [];
   const result = await resolveDrafts([{ sn: 'SN-META' }], 'auth-root', mergeLabelConfig(), {
@@ -398,6 +409,25 @@ test('resolveDrafts classRootPath empty override scans all classes from env-root
   }
 });
 
+test('resolveDrafts uses env class root by default and preserves inherited attributes', async () => {
+  const previous = process.env.CMDB_LABELS_CLASS_ROOT_PATH;
+  process.env.CMDB_LABELS_CLASS_ROOT_PATH = '/classes/ZabbixMonitoring';
+  try {
+    const moduleUrl = new URL(`../../src/server.mjs?env-root-default-${Date.now()}`, import.meta.url);
+    const serverModule = await import(moduleUrl.href);
+    const result = await serverModule.resolveDrafts([{ sn: 'SN-INHERITED' }], 'auth-env-root-default', mergeLabelConfig(), {
+      cmdbuildRequest: inheritedAttributesCmdbuildRequest
+    });
+
+    assert.equal(result.ok, true);
+    assert.equal(result.devices[0]._sourceClass, 'CustomerDevice');
+    assert.equal(result.devices[0].sn, 'SN-INHERITED');
+  } finally {
+    if (previous === undefined) delete process.env.CMDB_LABELS_CLASS_ROOT_PATH;
+    else process.env.CMDB_LABELS_CLASS_ROOT_PATH = previous;
+  }
+});
+
 test('resolveDrafts searches child class by inherited superclass serial attribute', async () => {
   const calls = [];
   const result = await resolveDrafts([{ sn: 'SN-INHERITED' }], 'auth-inherited-sn', mergeLabelConfig(), {
@@ -420,6 +450,54 @@ test('resolveDrafts searches child class by inherited superclass serial attribut
     return decodeURIComponent(requestUrl.pathname).endsWith('/classes/CustomerDevice/cards') &&
       (requestUrl.searchParams.get('filter') || '').includes('brlSN');
   }), false);
+});
+
+test('resolveDrafts uses detailed class metadata when class list omits superclass', async () => {
+  const calls = [];
+  const result = await resolveDrafts([{ sn: 'SN-DETAIL' }], 'auth-detail-inherited-sn', mergeLabelConfig(), {
+    classRootPath: '/classes/ZabbixMonitoring',
+    cmdbuildRequest: recordingCmdbuildRequest(calls, inheritedAttributesCmdbuildRequest)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0]._sourceClass, 'DetailOnlyChildDevice');
+  assert.equal(result.devices[0].sn, 'SN-DETAIL');
+  assert.equal(result.devices[0].model, 'HP 1111');
+  assert.equal(result.devices[0].type, 'Printer');
+  assert.equal(calls.some((pathname) => decodeURIComponent(new URL(pathname, 'http://cmdbuild.local').pathname).endsWith('/classes/DetailOnlyChildDevice')), true);
+  assert.equal(calls.some((pathname) => {
+    const requestUrl = new URL(pathname, 'http://cmdbuild.local');
+    return decodeURIComponent(requestUrl.pathname).endsWith('/classes/DetailOnlyChildDevice/cards') &&
+      (requestUrl.searchParams.get('filter') || '').includes('"attribute":"sn"');
+  }), true);
+});
+
+test('resolveDrafts uses detail metadata when list parent has display description only', async () => {
+  const calls = [];
+  const result = await resolveDrafts([{ sn: 'SN-DESCRIPTION-PARENT' }], 'auth-description-parent', mergeLabelConfig(), {
+    classRootPath: '/classes/ZabbixMonitoring',
+    cmdbuildRequest: recordingCmdbuildRequest(calls, inheritedAttributesCmdbuildRequest)
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0]._sourceClass, 'DescriptionParentChildDevice');
+  assert.equal(result.devices[0].sn, 'SN-DESCRIPTION-PARENT');
+  assert.equal(result.devices[0].model, 'HP 1111');
+  assert.equal(result.devices[0].type, 'Printer');
+  assert.equal(calls.some((pathname) => decodeURIComponent(new URL(pathname, 'http://cmdbuild.local').pathname).endsWith('/classes/DescriptionParentChildDevice')), true);
+});
+
+test('resolveDrafts keeps large rooted catalog within default REST budget', async () => {
+  const result = await resolveDrafts([{ sn: 'SN-LARGE-120' }], 'auth-large-catalog', mergeLabelConfig(), {
+    classRootPath: '/classes/ZabbixMonitoring',
+    cmdbuildRequest: largeCatalogCmdbuildRequest
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.devices[0]._sourceClass, 'LargeDevice120');
+  assert.equal(result.devices[0].sn, 'SN-LARGE-120');
+  assert.ok(result.meta.cmdbuildRestCalls > 610);
+  assert.ok(result.meta.cmdbuildRestCalls < 1010);
 });
 
 test('resolveDrafts lets child serial attribute override inherited serial attribute', async () => {
@@ -619,6 +697,8 @@ async function inheritedAttributesCmdbuildRequest(pathname) {
         { name: 'ZabbixMonitoring', active: true, prototype: true },
         { name: 'BaseDevice', active: true, parent_name: 'ZabbixMonitoring' },
         { name: 'CustomerDevice', active: true, parent_name: 'BaseDevice', superclass: 'BaseDevice' },
+        { name: 'DetailOnlyChildDevice', active: true },
+        { name: 'DescriptionParentChildDevice', active: true, parent: { description: 'Zabbix Monitoring' } },
         { name: 'ChildOverrideDevice', active: true, parent_name: 'BaseDevice', superclass: 'BaseDevice' },
         { name: 'RootSerialDevice', active: true, parent_name: 'ZabbixMonitoring' },
         { name: 'ParentSerialDevice', active: true, parent_name: 'RootSerialDevice' },
@@ -632,6 +712,12 @@ async function inheritedAttributesCmdbuildRequest(pathname) {
   }
 
   const classMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)$/);
+  if (classMatch && classMatch[1] === 'DetailOnlyChildDevice') {
+    return ok({ data: { name: 'DetailOnlyChildDevice', active: true, parent_name: 'BaseDevice', superclass: 'BaseDevice' } });
+  }
+  if (classMatch && classMatch[1] === 'DescriptionParentChildDevice') {
+    return ok({ data: { name: 'DescriptionParentChildDevice', active: true, parent_name: 'BaseDevice', superclass: 'BaseDevice' } });
+  }
   if (classMatch) return ok({ data: { name: classMatch[1], active: true } });
 
   const attributesMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)\/attributes$/);
@@ -644,6 +730,14 @@ async function inheritedAttributesCmdbuildRequest(pathname) {
       CustomerDevice: [
         { name: 'Code', description: 'Инв. номер', type: 'string', active: true },
         { name: 'brlSN', description: 'Серийный номер', type: 'string', active: false },
+        { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta', active: true }
+      ],
+      DetailOnlyChildDevice: [
+        { name: 'Code', description: 'Инв. номер', type: 'string', active: true },
+        { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta', active: true }
+      ],
+      DescriptionParentChildDevice: [
+        { name: 'Code', description: 'Инв. номер', type: 'string', active: true },
         { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta', active: true }
       ],
       ChildOverrideDevice: [
@@ -693,6 +787,12 @@ async function inheritedAttributesCmdbuildRequest(pathname) {
     if (className === 'CustomerDevice' && searchedAttribute === 'sn' && searchedValue === 'SN-INHERITED') {
       return ok({ data: [{ _id: 201, Code: 'INV-INHERITED', sn: 'SN-INHERITED', model: 101, _model_description: 'HP 1111' }] });
     }
+    if (className === 'DetailOnlyChildDevice' && searchedAttribute === 'sn' && searchedValue === 'SN-DETAIL') {
+      return ok({ data: [{ _id: 206, Code: 'INV-DETAIL', sn: 'SN-DETAIL', model: 101, _model_description: 'HP 1111' }] });
+    }
+    if (className === 'DescriptionParentChildDevice' && searchedAttribute === 'sn' && searchedValue === 'SN-DESCRIPTION-PARENT') {
+      return ok({ data: [{ _id: 207, Code: 'INV-DESCRIPTION-PARENT', sn: 'SN-DESCRIPTION-PARENT', model: 101, _model_description: 'HP 1111' }] });
+    }
     if (className === 'ChildOverrideDevice' && searchedAttribute === 'sn' && searchedValue === 'SN-CHILD') {
       return ok({ data: [{ _id: 202, Code: 'INV-CHILD', sn: 'SN-CHILD', model: 101, _model_description: 'HP 1111' }] });
     }
@@ -704,6 +804,61 @@ async function inheritedAttributesCmdbuildRequest(pathname) {
     }
     if (className === 'LoopDevice' && searchedAttribute === 'sn' && searchedValue === 'SN-LOOP') {
       return ok({ data: [{ _id: 205, Code: 'INV-LOOP', sn: 'SN-LOOP', model: 101, _model_description: 'HP 1111' }] });
+    }
+    return ok({ data: [] });
+  }
+
+  const lookupMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/lookup_types\/([^/]+)\/values$/);
+  if (lookupMatch) {
+    return ok({ data: lookupValues[lookupMatch[1]] || [] });
+  }
+
+  return notFound();
+}
+
+async function largeCatalogCmdbuildRequest(pathname) {
+  const requestUrl = new URL(pathname, 'http://cmdbuild.local');
+  const decodedPath = decodeURIComponent(requestUrl.pathname);
+
+  if (decodedPath === '/cmdbuild/services/rest/v3/classes') {
+    return ok({
+      data: [
+        { name: 'ZabbixMonitoring', active: true, prototype: true },
+        ...Array.from({ length: 400 }, (_, index) => ({
+          name: `LargeDevice${index + 1}`,
+          active: true,
+          parent_name: 'ZabbixMonitoring'
+        }))
+      ]
+    });
+  }
+
+  const classMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)$/);
+  if (classMatch) return ok({ data: { name: classMatch[1], active: true, parent_name: 'ZabbixMonitoring' } });
+
+  const attributesMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)\/attributes$/);
+  if (attributesMatch) {
+    const className = attributesMatch[1];
+    if (!className.startsWith('LargeDevice')) return ok({ data: [] });
+    return ok({
+      data: [
+        { name: 'Code', description: 'Инв. номер', type: 'string', active: true },
+        { name: 'sn', description: 'Серийный номер', type: 'string', active: true },
+        { name: 'model', description: 'Модель', type: 'lookup', lookupType: 'ModelMeta', active: true }
+      ]
+    });
+  }
+
+  const cardsMatch = decodedPath.match(/^\/cmdbuild\/services\/rest\/v3\/classes\/([^/]+)\/cards$/);
+  if (cardsMatch) {
+    const className = cardsMatch[1];
+    const filter = requestUrl.searchParams.get('filter') || '';
+    const parsedFilter = filter ? JSON.parse(filter) : null;
+    const searchedAttribute = parsedFilter && parsedFilter.attribute && parsedFilter.attribute.simple && parsedFilter.attribute.simple.attribute;
+    const searchedValues = parsedFilter && parsedFilter.attribute && parsedFilter.attribute.simple && parsedFilter.attribute.simple.value;
+    const searchedValue = Array.isArray(searchedValues) ? searchedValues[0] : '';
+    if (className === 'LargeDevice120' && searchedAttribute === 'sn' && searchedValue === 'SN-LARGE-120') {
+      return ok({ data: [{ _id: 120, Code: 'INV-LARGE-120', sn: 'SN-LARGE-120', model: 101, _model_description: 'HP 1111' }] });
     }
     return ok({ data: [] });
   }

@@ -8,8 +8,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildIdentityPayload,
+  createServer,
   injectAppVersion,
   injectFooterConfig,
+  injectLabelConfig,
   sanitizeDiagnosticParam,
   normalizeClassRootPath,
   normalizeLogTargets,
@@ -395,6 +397,67 @@ test('footer config injection stores DOM-rendered config as base64url JSON', () 
   assert.equal(config.subject, 'Предложения по CMDBuild Label');
   assert.doesNotMatch(result, /<DIT>/);
   assert.doesNotMatch(result, /<script>"/);
+});
+
+test('label config injection stores aliases without config source details', () => {
+  const html = '<script id="labelConfig" type="application/json" data-label-config=""></script>';
+  const result = injectLabelConfig(html, {
+    aliases: {
+      sn: ['CustomerSerial'],
+      inv: ['CustomerInventory']
+    }
+  });
+  const encoded = result.match(/data-label-config="([^"]+)"/)[1];
+  const config = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+
+  assert.ok(config.aliases.sn.includes('CustomerSerial'));
+  assert.ok(config.aliases.inv.includes('CustomerInventory'));
+  assert.ok(config.aliases.sn.includes('SN'));
+  assert.doesNotMatch(result, /CMDB_LABELS_ALIAS_CONFIG_FILE|aliases\.json|CustomerSerial"/);
+});
+
+test('served UI publishes active alias config into label parser config', async (t) => {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cmdb2label-alias-reachability-'));
+  const aliasPath = path.join(tempDir, 'aliases.json');
+  const previousAliasFile = process.env.CMDB_LABELS_ALIAS_CONFIG_FILE;
+  fs.writeFileSync(aliasPath, JSON.stringify({ aliases: { sn: ['CustomerSerial'] } }));
+  process.env.CMDB_LABELS_ALIAS_CONFIG_FILE = aliasPath;
+
+  const server = createServer();
+  const listening = await new Promise((resolve, reject) => {
+    server.once('error', (error) => {
+      if (error && error.code === 'EPERM') {
+        resolve(false);
+        return;
+      }
+      reject(error);
+    });
+    server.listen(0, '127.0.0.1', () => {
+      resolve(true);
+    });
+  });
+
+  try {
+    if (!listening) {
+      t.skip('sandbox blocks local listener for served UI alias reachability');
+      return;
+    }
+    const { port } = server.address();
+    const response = await fetch(`http://127.0.0.1:${port}/cmdbuild/labels/ui`);
+    const html = await response.text();
+    const encoded = html.match(/data-label-config="([^"]+)"/)[1];
+    const config = JSON.parse(Buffer.from(encoded, 'base64url').toString('utf8'));
+
+    assert.equal(response.status, 200);
+    assert.ok(config.aliases.sn.includes('CustomerSerial'));
+  } finally {
+    if (listening) {
+      await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+    }
+    fs.rmSync(tempDir, { recursive: true, force: true });
+    if (previousAliasFile === undefined) delete process.env.CMDB_LABELS_ALIAS_CONFIG_FILE;
+    else process.env.CMDB_LABELS_ALIAS_CONFIG_FILE = previousAliasFile;
+  }
 });
 
 test('build identity does not promote runtime env provenance to verified', () => {

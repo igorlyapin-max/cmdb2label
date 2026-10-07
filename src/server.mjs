@@ -74,7 +74,7 @@ const CATALOG_TTL_MS = readRuntimeInteger('CMDB_LABELS_CATALOG_TTL_MS', 300_000,
 const MAX_CLASSES = readRuntimeInteger('CMDB_LABELS_MAX_CLASSES', 400, 1, 10000);
 const MAX_SEARCH_CLASSES = readRuntimeInteger('CMDB_LABELS_MAX_SEARCH_CLASSES', 160, 1, 10000);
 const MAX_MATCHES = readRuntimeInteger('CMDB_LABELS_MAX_MATCHES', 50, 1, 1000);
-const DEFAULT_MAX_REST_CALLS = Math.max(250, MAX_CLASSES + MAX_SEARCH_CLASSES + 50);
+const DEFAULT_MAX_REST_CALLS = Math.max(250, (MAX_CLASSES * 2) + MAX_SEARCH_CLASSES + 50);
 const MAX_REST_CALLS = readRuntimeInteger('CMDB_LABELS_MAX_REST_CALLS', DEFAULT_MAX_REST_CALLS, 10, 50000);
 const MAX_RESOLVE_DEVICES = readRuntimeInteger('CMDB_LABELS_MAX_RESOLVE_DEVICES', 100, 1, 10000);
 const CARD_SEARCH_LIMIT = readRuntimeInteger('CMDB_LABELS_CARD_SEARCH_LIMIT', 20, 1, 1000);
@@ -1164,9 +1164,16 @@ function classParentNames(item = {}) {
     item.parent_name,
     item.parentName,
     item.parentCode,
+    item.parentClass,
+    item.parent_class,
     item.superclass,
     item.superClass,
+    item.superclass_name,
+    item.superClassName,
     item._superclass,
+    item.baseClass,
+    item.base_class,
+    item.extends,
     item.ancestors,
     item._ancestors
   ].flatMap(classReferenceNames));
@@ -1179,9 +1186,16 @@ function classDirectParentNames(item = {}) {
     item.parent_name,
     item.parentName,
     item.parentCode,
+    item.parentClass,
+    item.parent_class,
     item.superclass,
     item.superClass,
-    item._superclass
+    item.superclass_name,
+    item.superClassName,
+    item._superclass,
+    item.baseClass,
+    item.base_class,
+    item.extends
   ].flatMap(classReferenceNames));
 }
 
@@ -1238,6 +1252,19 @@ function mergeClassLists(...lists) {
     result.push(item);
   }
   return result;
+}
+
+function mergeClassMetadata(base, detail) {
+  if (base && detail) return { ...base, ...detail };
+  return detail || base || null;
+}
+
+function storeClassMetadata(item, classIndex, classMetadataCache) {
+  if (!item) return;
+  for (const alias of classIdentifierNames(item)) {
+    classIndex.set(alias, item);
+    if (classMetadataCache) classMetadataCache.set(alias, item);
+  }
 }
 
 async function loadRootClass(authToken, rootName, context) {
@@ -1376,13 +1403,29 @@ async function loadClassCatalog(authToken, labelConfig, context, classRootPath =
   const classIndex = buildClassIndex(allClasses);
   const classMetadataCache = new Map();
   const attributesCache = new Map();
-  const rawClasses = filterClassesByRoot(allClasses, classRootPath);
+  const initialRawClasses = filterClassesByRoot(allClasses, classRootPath);
+  const initialRootNames = new Set(initialRawClasses.flatMap(classIdentifierNames));
+  const rootDetailCandidates = root.rootName
+    ? allClasses.filter((item) => {
+      if (classIdentifierNames(item).some((name) => initialRootNames.has(name))) return false;
+      const parentNames = classParentNames(item);
+      return !parentNames.length || !parentNames.some((name) => classIndex.has(name));
+    })
+    : [];
+  const detailedRootCandidates = rootDetailCandidates.length
+    ? await loadClassMetadataList(rootDetailCandidates, authToken, context, classIndex, classMetadataCache)
+    : [];
+  const classesForRootFilter = detailedRootCandidates.length
+    ? mergeClassLists(detailedRootCandidates, allClasses)
+    : allClasses;
+  const rawClasses = detailedRootCandidates.length ? filterClassesByRoot(classesForRootFilter, classRootPath) : initialRawClasses;
   const catalog = [];
 
   for (const item of rawClasses) {
     const className = cleanValue(item.name || item.code);
     if (!className) continue;
-    const attributes = await loadEffectiveClassAttributes(item, authToken, context, classIndex, classMetadataCache, attributesCache);
+    const classItem = await loadClassMetadata(className, authToken, context, classIndex, classMetadataCache) || item;
+    const attributes = await loadEffectiveClassAttributes(classItem, authToken, context, classIndex, classMetadataCache, attributesCache);
     const fieldMap = buildFieldMap(attributes, aliases);
     const fieldMeta = buildFieldMetadataMap(attributes, aliases);
     logDiagnostic('Basic', 'catalog.class_mapped', {
@@ -1397,8 +1440,8 @@ async function loadClassCatalog(authToken, labelConfig, context, classRootPath =
     if (!fieldMap.inv && !fieldMap.sn) continue;
     catalog.push({
       name: className,
-      description: cleanValue(item.description || item._description || item.name),
-      prototype: Boolean(item.prototype),
+      description: cleanValue(classItem.description || classItem._description || item.description || item._description || className),
+      prototype: Boolean(classItem.prototype || item.prototype),
       fieldMap,
       fieldMeta,
       attributes: uniqueStrings(Object.values(fieldMap))
@@ -1408,6 +1451,7 @@ async function loadClassCatalog(authToken, labelConfig, context, classRootPath =
   logDiagnostic('Basic', 'catalog.loaded', {
     classesScanned: rawClasses.length,
     classRootPath: normalizeClassRootPath(classRootPath).path,
+    classDetailsForRootFilter: detailedRootCandidates.length,
     searchableClasses: catalog.length
   });
   return catalog;
@@ -1421,6 +1465,17 @@ function buildClassIndex(classes = []) {
     }
   }
   return index;
+}
+
+async function loadClassMetadataList(classes, authToken, context, classIndex, classMetadataCache) {
+  const result = [];
+  for (const item of classes) {
+    const className = cleanValue(item && (item.name || item.code));
+    if (!className) continue;
+    const loaded = await loadClassMetadata(className, authToken, context, classIndex, classMetadataCache);
+    if (loaded) result.push(loaded);
+  }
+  return result;
 }
 
 function attributeIdentifier(attribute = {}) {
@@ -1446,17 +1501,14 @@ function mergeAttributesByIdentifier(...attributeLists) {
 async function loadClassMetadata(className, authToken, context, classIndex, classMetadataCache) {
   const name = cleanValue(className);
   if (!name) return null;
-  if (classIndex.has(name)) return classIndex.get(name);
   if (classMetadataCache.has(name)) return classMetadataCache.get(name);
+  const base = classIndex.has(name) ? classIndex.get(name) : null;
 
   const promise = loadRootClass(authToken, name, context)
     .then((loaded) => {
-      if (!loaded) return null;
-      for (const alias of classIdentifierNames(loaded)) {
-        if (!classIndex.has(alias)) classIndex.set(alias, loaded);
-        if (!classMetadataCache.has(alias)) classMetadataCache.set(alias, loaded);
-      }
-      return loaded;
+      const merged = mergeClassMetadata(base, loaded);
+      if (merged) storeClassMetadata(merged, classIndex, classMetadataCache);
+      return merged;
     })
     .catch((error) => {
       classMetadataCache.delete(name);
@@ -1465,9 +1517,7 @@ async function loadClassMetadata(className, authToken, context, classIndex, clas
   classMetadataCache.set(name, promise);
   const loaded = await promise;
   if (!loaded) return null;
-  for (const alias of classIdentifierNames(loaded)) {
-    if (!classIndex.has(alias)) classIndex.set(alias, loaded);
-  }
+  storeClassMetadata(loaded, classIndex, classMetadataCache);
   return loaded;
 }
 
@@ -2035,14 +2085,27 @@ function injectFooterConfig(html, config = {}) {
   );
 }
 
+function injectLabelConfig(html, config = {}) {
+  const aliases = {};
+  const merged = mergeLabelConfig(config);
+  for (const field of REQUIRED_FIELDS) {
+    aliases[field] = uniqueStrings((merged.aliases[field] || []).map(cleanValue));
+  }
+  const encoded = Buffer.from(JSON.stringify({ aliases }), 'utf8').toString('base64url');
+  return String(html).replace(
+    /(<script id="labelConfig" type="application\/json" data-label-config=")[^"]*("><\/script>)/,
+    `$1${encoded}$2`
+  );
+}
+
 function serveUi(res) {
-  const html = injectFooterConfig(injectAppVersion(fs.readFileSync(UI_HTML_PATH, 'utf8')), {
+  const html = injectLabelConfig(injectFooterConfig(injectAppVersion(fs.readFileSync(UI_HTML_PATH, 'utf8')), {
     enabled: FOOTER_ENABLED,
     title: FOOTER_TITLE,
     text: FOOTER_TEXT,
     email: FOOTER_EMAIL,
     subject: FOOTER_SUBJECT
-  });
+  }), loadAliasConfig());
   sendHtml(res, 200, html);
 }
 
@@ -2290,6 +2353,7 @@ export {
   incMetric,
   injectAppVersion,
   injectFooterConfig,
+  injectLabelConfig,
   isCmdbuildProxyPathAllowed,
   isCmdbuildUiCacheSensitive,
   isJsonContentType,

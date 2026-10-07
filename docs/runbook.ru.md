@@ -292,6 +292,13 @@ curl -fsS http://127.0.0.1:8094/metrics
 }
 ```
 
+Один и тот же alias config используется в двух местах:
+
+- в UI для CSV headers, одноколоночного CSV и copy/paste пар `атрибут -> значение`;
+- в backend для сопоставления CMDBuild attributes по `name`, `code`, `description` и `_description`.
+
+Например, если в CMDBuild атрибут имеет `name = "sn"` и `description = "Серийный номер"`, CSV заголовки `SN`, `sn` и `Серийный номер` должны считаться серийным номером. Если у заказчика принят другой заголовок, добавьте его в `aliases.sn`; после перезапуска backend тот же alias будет работать и в UI, и в backend resolve.
+
 По умолчанию `type` на этикетке означает `Тип`: backend берет CMDBuild-атрибут, mapped как `model`, читает его lookup value и выводит parent lookup. Если в конкретной модели CMDBuild это поле заполняется вручную из CSV, можно оставить alias для `type`; если нужно отключить derive, задайте `"enabled": false`.
 
 `Code` остается fallback-алиасом для `inv`, но business aliases имеют приоритет. Если у заказчика есть отдельный атрибут инвентарного номера, добавьте его в `aliases.inv`; не используйте `Code` как единственный inventory alias, если это технический код карточки.
@@ -300,8 +307,8 @@ curl -fsS http://127.0.0.1:8094/metrics
 
 CSV с одной колонкой:
 
-- заголовок `SN` или `Серийный номер` означает список серийных номеров;
-- заголовок `Инв. номер` или `Инвентарный номер` означает список инвентарных номеров;
+- любой заголовок из `aliases.sn`, например `SN`, `sn`, `Серийный номер`, означает список серийных номеров;
+- любой заголовок из `aliases.inv`, например `Инв. номер` или `Инвентарный номер`, означает список инвентарных номеров;
 - если заголовка нет или он не распознан, UI передает значение как внутренний `lookupKey`; backend ищет карточку сначала по `SN`, затем по `Инв. номер`;
 - `lookupKey` не печатается и не подставляется в `Инв. номер` без найденной карточки CMDBuild.
 
@@ -337,7 +344,7 @@ CMDB_LABELS_CLASS_ROOT_PATH=/classes/ZabbixMonitoring
 
 Формат значения - путь от корня namespace classes, сегменты разделяются `/`: `/classes/<ClassName>` или `/classes/<ParentName>/<ClassName>`. Backend использует последний сегмент как root class name/code и включает root plus descendants по metadata `/classes`: `parent`, `_parent`, `parent_name`, `parentName`, `superclass`, `superClass`, `_superclass`, `ancestors`.
 
-Для текущего стенда используйте `/classes/ZabbixMonitoring`. Если CMDBuild не отдает parent/ancestor metadata в `/classes`, backend сможет выбрать только сам `ZabbixMonitoring`; в этом случае нужные asset classes должны быть видимы как descendants в metadata или root нужно выставить ближе к реальным searchable classes.
+Для текущего стенда используйте `/classes/ZabbixMonitoring`. Если CMDBuild не отдает parent/ancestor metadata в `/classes`, backend дозагружает detail metadata через `/classes/<ClassName>` и повторно использует ее для root filtering и inherited attributes. Если после этого нужный asset class не входит в subtree, root нужно выставить ближе к реальным searchable classes или проверить права текущего пользователя CMDBuild.
 
 REST/search лимиты:
 
@@ -347,7 +354,7 @@ CMDB_LABELS_HEALTH_TIMEOUT_MS=2000
 CMDB_LABELS_CATALOG_TTL_MS=300000
 CMDB_LABELS_MAX_CLASSES=400
 CMDB_LABELS_MAX_SEARCH_CLASSES=160
-CMDB_LABELS_MAX_REST_CALLS=610
+CMDB_LABELS_MAX_REST_CALLS=1010
 CMDB_LABELS_MAX_RESOLVE_DEVICES=100
 CMDB_LABELS_MAX_MATCHES=50
 CMDB_LABELS_CARD_SEARCH_LIMIT=20

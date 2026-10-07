@@ -89,16 +89,17 @@ GET  /metrics
 Backend строит каталог доступных классов автоматически:
 
 - читает `/classes`;
+- дозагружает `/classes/<ClassName>` для уточнения parent/superclass metadata, когда включен root filter;
 - если задан `CMDB_LABELS_CLASS_ROOT_PATH`, ограничивает список root class и его descendants до чтения атрибутов;
 - для каждого доступного класса читает `/attributes`;
-- выбирает классы, где найдены алиасы `inv` или `sn`;
+- выбирает классы, где найдены алиасы `inv` или `sn` по `name`, `code`, `description` или `_description`;
 - ищет карточки по `inv` и `sn`;
 - поле `type` на этикетке означает `Тип`; по умолчанию оно выводится из parent lookup значения атрибута, mapped как `model`;
 - если CMDBuild filter отличается в конкретной версии, использует ограниченный fallback чтения карточек класса.
 
 Каталог кэшируется per session/config hash, потому что разные пользователи и alias/derived настройки могут видеть разные классы и атрибуты.
 
-`CMDB_LABELS_CLASS_ROOT_PATH` задается как путь от корня namespace classes, например `/classes/ZabbixMonitoring`. Backend использует последний сегмент как root class name/code и включает descendants по metadata `/classes`: `parent`, `_parent`, `parent_name`, `parentName`, `superclass`, `superClass`, `_superclass`, `ancestors`. Если CMDBuild не отдает связь классов в metadata, будет выбран только сам root class.
+`CMDB_LABELS_CLASS_ROOT_PATH` задается как путь от корня namespace classes, например `/classes/ZabbixMonitoring`. Backend использует последний сегмент как root class name/code и включает descendants по metadata `/classes` и `/classes/<ClassName>`: `parent`, `_parent`, `parent_name`, `parentName`, `parentClass`, `parent_class`, `superclass`, `superClass`, `superclass_name`, `superClassName`, `_superclass`, `baseClass`, `base_class`, `extends`, `ancestors`. Если CMDBuild не отдает связь классов в metadata, будет выбран только сам root class.
 
 ## Runtime controls
 
@@ -122,7 +123,7 @@ CMDB_LABELS_HEALTH_TIMEOUT_MS=2000
 CMDB_LABELS_CATALOG_TTL_MS=300000
 CMDB_LABELS_MAX_CLASSES=400
 CMDB_LABELS_MAX_SEARCH_CLASSES=160
-CMDB_LABELS_MAX_REST_CALLS=610
+CMDB_LABELS_MAX_REST_CALLS=1010
 CMDB_LABELS_MAX_RESOLVE_DEVICES=100
 CMDB_LABELS_MAX_MATCHES=50
 CMDB_LABELS_CARD_SEARCH_LIMIT=20
@@ -169,6 +170,8 @@ Customer CA не является application secret и не хранится в
   }
 }
 ```
+
+Этот alias config является общим для UI и backend. UI использует его для CSV headers, одноколоночного CSV и copy/paste пар `атрибут -> значение`; backend использует те же aliases для поиска CMDBuild attributes. В HTML передаются только effective aliases, без path/source alias config и без customer data.
 
 Config validation выполняется на старте и в readiness path. Некорректный JSON, нечитаемый файл, alias entry не массивом или `derivedFields.typeFromModelLookupParent.typeField` не равный `"type"` считаются ошибкой конфигурации. Legacy keys `aliases.cls`, `derivedFields.groupFromLookupParent`, `sourceField` и `targetField` принимаются только как migration path и дают warning.
 

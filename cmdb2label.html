@@ -322,9 +322,10 @@
     <div><span data-footer-text>Предложения и замечания направлять на почту:</span> <a data-footer-email href="mailto:ritm.all@gkm.ru?subject=%D0%9F%D1%80%D0%B5%D0%B4%D0%BB%D0%BE%D0%B6%D0%B5%D0%BD%D0%B8%D1%8F%20%D0%BF%D0%BE%20CMDBuild%20Label">ritm.all@gkm.ru</a></div>
 </div>
 <script id="footerConfig" type="application/json" data-footer-config=""></script>
+<script id="labelConfig" type="application/json" data-label-config=""></script>
 
 <script>
-function decodeFooterConfig(encoded) {
+function decodeBase64UrlJson(encoded) {
     if (!encoded) return null;
     try {
         const normalized = String(encoded).replace(/-/g, '+').replace(/_/g, '/');
@@ -334,6 +335,10 @@ function decodeFooterConfig(encoded) {
     } catch (error) {
         return null;
     }
+}
+
+function decodeFooterConfig(encoded) {
+    return decodeBase64UrlJson(encoded);
 }
 
 function applyFooterConfig() {
@@ -353,7 +358,7 @@ function applyFooterConfig() {
         const address = config.email || '';
         email.textContent = address;
         if (address) {
-            email.setAttribute('href', 'mailto:' + encodeURIComponent(address) + '?subject=' + encodeURIComponent(config.subject || ''));
+            email.setAttribute('href', 'mailto:' + address + '?subject=' + encodeURIComponent(config.subject || ''));
             email.hidden = false;
         } else {
             email.removeAttribute('href');
@@ -746,12 +751,44 @@ function stripBom(text) {
     return String(text || '').replace(/^\uFEFF/, '');
 }
 
+function uniqueStrings(values) {
+    const seen = new Set();
+    const result = [];
+    values.forEach(value => {
+        const text = String(value || '').trim();
+        if (!text || seen.has(text)) return;
+        seen.add(text);
+        result.push(text);
+    });
+    return result;
+}
+
+function readLabelAliases() {
+    const fallback = {};
+    Object.keys(HEADER_ALIASES).forEach(field => {
+        fallback[field] = HEADER_ALIASES[field].slice();
+    });
+    if (typeof document === 'undefined') return fallback;
+
+    const configNode = document.getElementById('labelConfig');
+    const config = configNode ? decodeBase64UrlJson(configNode.getAttribute('data-label-config')) : null;
+    const aliases = config && config.aliases && typeof config.aliases === 'object' && !Array.isArray(config.aliases)
+        ? config.aliases
+        : {};
+    Object.keys(HEADER_ALIASES).forEach(field => {
+        const configured = Array.isArray(aliases[field]) ? aliases[field] : [];
+        fallback[field] = uniqueStrings(fallback[field].concat(configured));
+    });
+    return fallback;
+}
+
 function buildAliasLookup() {
     const lookup = {};
-    Object.keys(HEADER_ALIASES).forEach(field => {
-        HEADER_ALIASES[field].forEach(alias => {
+    const aliases = readLabelAliases();
+    Object.keys(aliases).forEach(field => {
+        aliases[field].forEach((alias, index) => {
             const normalized = normalizeHeader(alias);
-            const match = { field, priority: getAliasPriority(field, alias) };
+            const match = { field, priority: getAliasPriority(field, alias, index, aliases[field]) };
             if (!lookup[normalized] || match.priority > lookup[normalized].priority) {
                 lookup[normalized] = match;
             }
@@ -760,10 +797,17 @@ function buildAliasLookup() {
     return lookup;
 }
 
-function getAliasPriority(field, alias) {
+function getAliasPriority(field, alias, index, aliasesForField) {
     const priorities = HEADER_ALIAS_PRIORITY[field] || {};
     if (Object.prototype.hasOwnProperty.call(priorities, alias)) return priorities[alias];
-    return 50;
+    const normalized = normalizeHeader(alias);
+    for (const name of Object.keys(priorities)) {
+        if (normalizeHeader(name) === normalized) return priorities[name];
+    }
+    const isDefault = (HEADER_ALIASES[field] || []).some(defaultAlias => normalizeHeader(defaultAlias) === normalized);
+    if (isDefault) return 50;
+    const aliases = Array.isArray(aliasesForField) ? aliasesForField : [];
+    return 200 + aliases.length - index;
 }
 
 function getAliasMatch(name) {

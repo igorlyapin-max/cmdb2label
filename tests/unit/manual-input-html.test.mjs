@@ -18,14 +18,17 @@ function extractFunction(source, name) {
   throw new Error(`Function ${name} body is not closed`);
 }
 
-function createHtmlHelpers() {
+function createHtmlHelpers(labelConfig = null) {
   const constantsStart = html.indexOf('const REQUIRED_FIELDS');
   const constantsEnd = html.indexOf('const API_BASE', constantsStart);
   assert.ok(constantsStart >= 0 && constantsEnd > constantsStart, 'manual parser constants must exist');
 
   const script = [
     html.slice(constantsStart, constantsEnd),
+    extractFunction(html, 'decodeBase64UrlJson'),
     extractFunction(html, 'stripBom'),
+    extractFunction(html, 'uniqueStrings'),
+    extractFunction(html, 'readLabelAliases'),
     extractFunction(html, 'buildAliasLookup'),
     extractFunction(html, 'getAliasPriority'),
     extractFunction(html, 'getAliasMatch'),
@@ -50,7 +53,19 @@ function createHtmlHelpers() {
     'globalThis.encodeUtf8 = encodeUtf8;'
   ].join('\n');
 
-  const sandbox = { TextEncoder };
+  const encodedConfig = labelConfig
+    ? Buffer.from(JSON.stringify(labelConfig), 'utf8').toString('base64url')
+    : '';
+  const sandbox = {
+    TextDecoder,
+    TextEncoder,
+    atob: (value) => Buffer.from(value, 'base64').toString('binary'),
+    document: labelConfig ? {
+      getElementById: (id) => id === 'labelConfig' ? {
+        getAttribute: (name) => name === 'data-label-config' ? encodedConfig : ''
+      } : null
+    } : undefined
+  };
   vm.runInNewContext(script, sandbox, { filename: 'cmdb2label-manual-parser.vm.js' });
   return sandbox;
 }
@@ -146,6 +161,31 @@ serialnum: SN-1
   assert.equal(parsed.device.model, 'HP 1111');
 });
 
+test('manual input uses aliases injected from backend config', () => {
+  const configured = createHtmlHelpers({
+    aliases: {
+      inv: ['CustomerInventory'],
+      model: ['CustomerModel'],
+      type: ['CustomerType'],
+      sn: ['CustomerSerial']
+    }
+  });
+  const parsed = configured.parseManualDevice(`CustomerInventory
+INV-1
+CustomerModel
+Model 1
+CustomerType
+Type 1
+CustomerSerial
+SN-1`);
+
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.device.inv, 'INV-1');
+  assert.equal(parsed.device.model, 'Model 1');
+  assert.equal(parsed.device.type, 'Type 1');
+  assert.equal(parsed.device.sn, 'SN-1');
+});
+
 test('CSV headers prefer explicit inventory number over technical Code alias', () => {
   const headerResult = helpers.mapCsvHeaders(['Code', 'Инв. номер', 'serialnum', 'Модель', 'Тип']);
   assert.equal(headerResult.errors.length, 0);
@@ -187,6 +227,27 @@ test('CSV headers accept customer aliases used by backend config examples', () =
   assert.equal(parsed.device.sn, 'CNDDJSTGFT');
 });
 
+test('CSV headers use aliases injected from backend config', () => {
+  const configured = createHtmlHelpers({
+    aliases: {
+      inv: ['CustomerInventory'],
+      model: ['CustomerModel'],
+      type: ['CustomerType'],
+      sn: ['CustomerSerial']
+    }
+  });
+  const headerResult = configured.mapCsvHeaders(['Code', 'CustomerInventory', 'CustomerModel', 'CustomerType', 'CustomerSerial']);
+  const parsed = configured.validateCsvRow(['TECH-CODE', 'INV-1', 'Model 1', 'Type 1', 'SN-1'], headerResult.mapping, 2);
+
+  assert.equal(headerResult.errors.length, 0);
+  assert.equal(headerResult.mapping.inv, 1);
+  assert.equal(headerResult.mapping.sn, 4);
+  assert.equal(parsed.device.inv, 'INV-1');
+  assert.equal(parsed.device.model, 'Model 1');
+  assert.equal(parsed.device.type, 'Type 1');
+  assert.equal(parsed.device.sn, 'SN-1');
+});
+
 test('CSV headers split CMDB hierarchical type/model display', () => {
   const headerResult = helpers.mapCsvHeaders(['Инвентарный номер', 'Тип / Модель', 'Серийный номер']);
   const parsed = helpers.validateCsvRow([
@@ -206,6 +267,31 @@ test('single-column CSV with SN header maps values to serial number', () => {
   const rows = [['SN'], ['CNDDJSTGFT']];
   const headerResult = helpers.mapSingleColumnCsv(rows);
   const parsed = helpers.validateCsvRow(rows[1], headerResult.mapping, 2);
+
+  assert.equal(headerResult.errors.length, 0);
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.device.sn, 'CNDDJSTGFT');
+  assert.equal(parsed.device.inv, '');
+  assert.equal(parsed.device.lookupKey, '');
+});
+
+test('single-column CSV with Russian serial header maps values to serial number', () => {
+  const rows = [['Серийный номер'], ['CNDDJSTGFT']];
+  const headerResult = helpers.mapSingleColumnCsv(rows);
+  const parsed = helpers.validateCsvRow(rows[1], headerResult.mapping, 2);
+
+  assert.equal(headerResult.errors.length, 0);
+  assert.equal(parsed.errors.length, 0);
+  assert.equal(parsed.device.sn, 'CNDDJSTGFT');
+  assert.equal(parsed.device.inv, '');
+  assert.equal(parsed.device.lookupKey, '');
+});
+
+test('single-column CSV uses injected serial alias as header', () => {
+  const configured = createHtmlHelpers({ aliases: { sn: ['CustomerSerial'] } });
+  const rows = [['CustomerSerial'], ['CNDDJSTGFT']];
+  const headerResult = configured.mapSingleColumnCsv(rows);
+  const parsed = configured.validateCsvRow(rows[1], headerResult.mapping, 2);
 
   assert.equal(headerResult.errors.length, 0);
   assert.equal(parsed.errors.length, 0);

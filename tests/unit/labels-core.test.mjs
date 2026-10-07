@@ -219,6 +219,19 @@ test('buildFieldMap prefers business inventory aliases over technical Code regar
   assert.equal(map.model, 'model');
 });
 
+test('buildFieldMap maps customer sn attribute by name and Russian description', () => {
+  const aliases = mergeAliasConfig();
+  const byName = buildFieldMap([
+    { name: 'sn', description: 'Серийный номер', type: 'string' }
+  ], aliases);
+  const byDescription = buildFieldMap([
+    { name: 'brlSN', description: 'Серийный номер', type: 'string' }
+  ], aliases);
+
+  assert.equal(byName.sn, 'sn');
+  assert.equal(byDescription.sn, 'brlSN');
+});
+
 test('buildFieldMap prefers business inventory attribute name over technical Code description', () => {
   const aliases = mergeAliasConfig();
   const map = buildFieldMap([
