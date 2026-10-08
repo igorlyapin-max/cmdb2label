@@ -83,6 +83,7 @@ const BODY_LIMIT_BYTES = readRuntimeInteger('CMDB_LABELS_BODY_LIMIT_BYTES', 512 
 const CLASS_ROOT_PATH = normalizeClassRootPath(process.env.CMDB_LABELS_CLASS_ROOT_PATH || '').path;
 const CSRF_SECRET = process.env.CMDB_LABELS_CSRF_SECRET || crypto.randomBytes(32).toString('hex');
 const DIAGNOSTIC_MODE = normalizeDiagnosticMode(process.env.CMDB_LABELS_DIAGNOSTIC_MODE || 'off');
+const SESSION_DIAGNOSTIC_MAX_LEVEL = normalizeDiagnosticMode(process.env.CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL || 'off');
 const LOG_LEVEL = normalizeLogLevel(process.env.CMDB_LABELS_LOG_LEVEL || 'info');
 const LOG_FORMAT = normalizeLogFormat(process.env.CMDB_LABELS_LOG_FORMAT || 'json');
 const LOG_TARGETS = normalizeLogTargets(process.env.CMDB_LABELS_LOG_TARGET || 'stdout');
@@ -220,9 +221,38 @@ function normalizeDiagnosticMode(value) {
   return 'off';
 }
 
-function diagnosticAllows(level) {
-  if (DIAGNOSTIC_MODE === 'Verbose') return level === 'Basic' || level === 'Verbose';
-  return DIAGNOSTIC_MODE === 'Basic' && level === 'Basic';
+function isDiagnosticModeValue(value) {
+  const text = String(value || '').trim().toLowerCase();
+  return text === 'off' || text === 'basic' || text === 'verbose';
+}
+
+function diagnosticModeRank(value) {
+  const mode = normalizeDiagnosticMode(value);
+  if (mode === 'Verbose') return 2;
+  if (mode === 'Basic') return 1;
+  return 0;
+}
+
+function diagnosticModeFromRank(rank) {
+  if (rank >= 2) return 'Verbose';
+  if (rank >= 1) return 'Basic';
+  return 'off';
+}
+
+function capDiagnosticMode(mode, maxLevel = SESSION_DIAGNOSTIC_MAX_LEVEL) {
+  return diagnosticModeFromRank(Math.min(diagnosticModeRank(mode), diagnosticModeRank(maxLevel)));
+}
+
+function diagnosticAllows(level, mode = DIAGNOSTIC_MODE) {
+  if (mode === 'Verbose') return level === 'Basic' || level === 'Verbose';
+  return mode === 'Basic' && level === 'Basic';
+}
+
+function effectiveDiagnosticMode(context = {}) {
+  const requestMode = normalizeDiagnosticMode(context.diagnosticMode || '');
+  const serverMode = normalizeDiagnosticMode(context.serverDiagnosticMode || DIAGNOSTIC_MODE);
+  const cappedRequestMode = capDiagnosticMode(requestMode, context.sessionDiagnosticMaxLevel || SESSION_DIAGNOSTIC_MAX_LEVEL);
+  return diagnosticModeFromRank(Math.max(diagnosticModeRank(serverMode), diagnosticModeRank(cappedRequestMode)));
 }
 
 function normalizeLogLevel(value) {
@@ -339,9 +369,19 @@ function writeLog(level, event, fields = {}, options = {}) {
   if (LOG_TARGETS.includes('syslog')) sendSyslog(payload);
 }
 
-function logDiagnostic(level, event, fields = {}) {
-  if (!diagnosticAllows(level)) return;
-  writeLog('info', `diagnostic.${event}`, { diagnosticMode: DIAGNOSTIC_MODE, ...fields }, { force: true });
+function logDiagnostic(level, event, fields = {}, context = {}) {
+  const mode = effectiveDiagnosticMode(context);
+  if (!diagnosticAllows(level, mode)) return;
+  const payload = {
+    diagnosticMode: mode,
+    ...(context.requestId ? { requestId: context.requestId } : {}),
+    ...fields
+  };
+  if (typeof context.diagnosticLogger === 'function') {
+    context.diagnosticLogger({ level, event: `diagnostic.${event}`, fields: payload });
+    if (context.diagnosticLoggerOnly) return;
+  }
+  writeLog('info', `diagnostic.${event}`, payload, { force: true });
 }
 
 function loggingStatus() {
@@ -352,7 +392,9 @@ function loggingStatus() {
     diagnostic: {
       mode: DIAGNOSTIC_MODE,
       enabled: DIAGNOSTIC_MODE !== 'off',
-      levels: ['Basic', 'Verbose']
+      levels: ['Basic', 'Verbose'],
+      sessionMaxLevel: SESSION_DIAGNOSTIC_MAX_LEVEL,
+      sessionEnabled: SESSION_DIAGNOSTIC_MAX_LEVEL !== 'off'
     },
     redactHeaders: Array.from(LOG_REDACT_HEADERS).sort(),
     externalSink: LOG_EXTERNAL_SINK,
@@ -377,6 +419,10 @@ function validateRuntimeConfig(input = {}) {
   const classRoot = normalizeClassRootPath(env.CMDB_LABELS_CLASS_ROOT_PATH || '');
   const integerValidation = validateRuntimeIntegers(env);
   const customCaValidation = validateCustomCaConfig(env);
+  const diagnosticModeValue = env.CMDB_LABELS_DIAGNOSTIC_MODE || 'off';
+  const sessionDiagnosticMaxLevelValue = env.CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL || 'off';
+  const diagnosticMode = normalizeDiagnosticMode(diagnosticModeValue);
+  const sessionDiagnosticMaxLevel = normalizeDiagnosticMode(sessionDiagnosticMaxLevelValue);
   const errors = [];
   const warnings = [];
 
@@ -401,11 +447,32 @@ function validateRuntimeConfig(input = {}) {
       message: 'Structured logs must always include stdout/stderr.'
     });
   }
-  if (DIAGNOSTIC_MODE === 'Verbose' && nodeEnv.toLowerCase() === 'production') {
+  if (!isDiagnosticModeValue(diagnosticModeValue)) {
+    errors.push({
+      code: 'invalid_diagnostic_mode',
+      env: 'CMDB_LABELS_DIAGNOSTIC_MODE',
+      message: 'CMDB_LABELS_DIAGNOSTIC_MODE must be one of: off, Basic, Verbose.'
+    });
+  }
+  if (!isDiagnosticModeValue(sessionDiagnosticMaxLevelValue)) {
+    errors.push({
+      code: 'invalid_session_diagnostic_max_level',
+      env: 'CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL',
+      message: 'CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL must be one of: off, Basic, Verbose.'
+    });
+  }
+  if (diagnosticMode === 'Verbose' && nodeEnv.toLowerCase() === 'production') {
     warnings.push({
       code: 'verbose_diagnostic_in_production',
       env: 'CMDB_LABELS_DIAGNOSTIC_MODE',
       message: 'Verbose diagnostics should be enabled only temporarily.'
+    });
+  }
+  if (sessionDiagnosticMaxLevel === 'Verbose' && nodeEnv.toLowerCase() === 'production') {
+    warnings.push({
+      code: 'verbose_session_diagnostic_in_production',
+      env: 'CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL',
+      message: 'Verbose session diagnostics should be enabled only temporarily.'
     });
   }
   if (!classRoot.ok) {
@@ -429,7 +496,8 @@ function validateRuntimeConfig(input = {}) {
   return {
     ok: errors.length === 0,
     nodeEnv,
-    diagnosticMode: DIAGNOSTIC_MODE,
+    diagnosticMode,
+    sessionDiagnosticMaxLevel,
     logTargets,
     externalLogSink,
     classRoot: {
@@ -536,6 +604,7 @@ function runtimeConfigSummary(validation = validateRuntimeConfig()) {
   return {
     nodeEnv: validation.nodeEnv || 'development',
     diagnosticMode: validation.diagnosticMode,
+    sessionDiagnosticMaxLevel: validation.sessionDiagnosticMaxLevel,
     logTargets: validation.logTargets,
     externalLogSink: validation.externalLogSink,
     classRoot: validation.classRoot,
@@ -1436,7 +1505,7 @@ async function loadClassCatalog(authToken, labelConfig, context, classRootPath =
       snAttribute: fieldMapAttributeName(fieldMap, 'sn'),
       modelLookupType: cleanValue(fieldMeta.model && fieldMeta.model.lookupType),
       hasModelLookupType: Boolean(cleanValue(fieldMeta.model && fieldMeta.model.lookupType))
-    });
+    }, context);
     if (!fieldMap.inv && !fieldMap.sn) continue;
     catalog.push({
       name: className,
@@ -1453,7 +1522,7 @@ async function loadClassCatalog(authToken, labelConfig, context, classRootPath =
     classRootPath: normalizeClassRootPath(classRootPath).path,
     classDetailsForRootFilter: detailedRootCandidates.length,
     searchableClasses: catalog.length
-  });
+  }, context);
   return catalog;
 }
 
@@ -1529,7 +1598,7 @@ async function loadOwnClassAttributes(className, authToken, context, attributesC
   const promise = countedCmdbuildRequest(`/cmdbuild/services/rest/v3/classes/${encodeURIComponent(name)}/attributes?limit=1000`, authToken, context)
     .then((attrs) => {
       if (!attrs.ok) {
-        logDiagnostic('Basic', 'catalog.attributes_skipped', { className: name, statusCode: attrs.statusCode });
+        logDiagnostic('Basic', 'catalog.attributes_skipped', { className: name, statusCode: attrs.statusCode }, context);
         return [];
       }
       return extractCmdbData(attrs.json)
@@ -1572,16 +1641,31 @@ async function resolveDrafts(drafts, authToken, labelConfig, options = {}) {
     restCalls: 0,
     lookupTypeCache: new Map(),
     cmdbuildRequest: options.cmdbuildRequest,
-    classRootPath: options.classRootPath === undefined ? CLASS_ROOT_PATH : options.classRootPath
+    classRootPath: options.classRootPath === undefined ? CLASS_ROOT_PATH : options.classRootPath,
+    requestId: options.requestId,
+    diagnosticMode: options.diagnosticMode,
+    sessionDiagnosticMaxLevel: options.sessionDiagnosticMaxLevel,
+    diagnosticLogger: options.diagnosticLogger,
+    diagnosticLoggerOnly: options.diagnosticLoggerOnly
   };
   const normalized = Array.isArray(drafts)
     ? drafts.map((draft, index) => normalizeDraftDevice({ row: index + 1, ...draft }, aliases))
     : [];
   const devices = [];
   const errors = [];
+  logDiagnostic('Basic', 'labels.resolve_requested', {
+    inputCount: normalized.length,
+    diagnosticContext: sanitizeDiagnosticContext(options.diagnosticContext || {})
+  }, context);
 
   for (const draft of normalized) {
     const row = draft.row || devices.length + 1;
+    logDiagnostic('Verbose', 'labels.normalized_draft', {
+      row,
+      presentFields: REQUIRED_FIELDS.filter((field) => cleanValue(draft[field])),
+      missingFields: REQUIRED_FIELDS.filter((field) => !cleanValue(draft[field])),
+      hasLookupKey: Boolean(cleanValue(draft.lookupKey))
+    }, context);
     if (isCompleteDevice(draft)) {
       devices.push(pickDeviceFields(draft));
       continue;
@@ -1664,9 +1748,17 @@ async function searchCmdbMatches(draft, authToken, labelConfig, context) {
       logDiagnostic('Basic', 'labels.search_key', {
         source: key.source || key.field,
         field: key.field,
-        className: classInfo.name
-      });
+        className: classInfo.name,
+        attribute
+      }, context);
       const cards = await searchClassCards(classInfo, attribute, key.value, authToken, context);
+      logDiagnostic('Basic', 'labels.search_result', {
+        source: key.source || key.field,
+        field: key.field,
+        className: classInfo.name,
+        attribute,
+        resultCount: cards.length
+      }, context);
       for (const card of cards) {
         const device = cmdbCardToDevice(card, classInfo, classInfo.fieldMap, {
           classFallbackForType: !isTypeLookupParentDerivationEnabled(labelConfig)
@@ -1695,11 +1787,26 @@ async function searchClassCards(classInfo, attribute, value, authToken, context)
 
   const filteredPath = `/cmdbuild/services/rest/v3/classes/${encodeURIComponent(classInfo.name)}/cards?${query.toString()}`;
   const response = await countedCmdbuildRequest(filteredPath, authToken, context);
-  if (response.ok) return extractCmdbData(response.json);
+  if (response.ok) {
+    const data = extractCmdbData(response.json);
+    logDiagnostic('Verbose', 'labels.card_search', {
+      className: classInfo.name,
+      attribute,
+      mode: 'filter',
+      statusCode: response.statusCode,
+      resultCount: data.length
+    }, context);
+    return data;
+  }
   if (![400, 404].includes(response.statusCode)) {
     if ([401, 403].includes(response.statusCode)) return [];
     throw new Error(`CMDBuild cards request failed with HTTP ${response.statusCode}`);
   }
+  logDiagnostic('Basic', 'labels.card_search_fallback', {
+    className: classInfo.name,
+    attribute,
+    statusCode: response.statusCode
+  }, context);
 
   const fallbackQuery = new URLSearchParams();
   fallbackQuery.set('limit', String(CARD_FALLBACK_LIMIT));
@@ -1710,7 +1817,15 @@ async function searchClassCards(classInfo, attribute, value, authToken, context)
     if ([401, 403].includes(fallback.statusCode)) return [];
     throw new Error(`CMDBuild fallback cards request failed with HTTP ${fallback.statusCode}`);
   }
-  return extractCmdbData(fallback.json).filter((card) => displayCmdbValue(card[attribute]) === cleanValue(value));
+  const fallbackData = extractCmdbData(fallback.json).filter((card) => displayCmdbValue(card[attribute]) === cleanValue(value));
+  logDiagnostic('Verbose', 'labels.card_search', {
+    className: classInfo.name,
+    attribute,
+    mode: 'fallback',
+    statusCode: fallback.statusCode,
+    resultCount: fallbackData.length
+  }, context);
+  return fallbackData;
 }
 
 async function applyDerivedFields(device, card, classInfo, labelConfig, authToken, context) {
@@ -1724,7 +1839,17 @@ async function applyDerivedFields(device, card, classInfo, labelConfig, authToke
   const modelAttr = fieldMapAttributeName(classInfo.fieldMap, modelField);
   const modelMeta = classInfo.fieldMeta && classInfo.fieldMeta[modelField];
   const sourceLookupType = cleanValue(rule.sourceLookupType || (modelMeta && modelMeta.lookupType));
-  if (!modelAttr || !sourceLookupType) return device;
+  if (!modelAttr || !sourceLookupType) {
+    logDiagnostic('Basic', 'labels.lookup_derive', {
+      className: classInfo.name,
+      modelField,
+      typeField,
+      modelAttribute: modelAttr,
+      sourceLookupType,
+      reason: modelAttr ? 'missing_lookup_type' : 'missing_model_attribute'
+    }, context);
+    return device;
+  }
 
   const values = await lookupValuesFromCardField(authToken, sourceLookupType, card, modelAttr, context);
   for (const value of values) {
@@ -1732,9 +1857,29 @@ async function applyDerivedFields(device, card, classInfo, labelConfig, authToke
     const text = displayCmdbValue(parent);
     if (text) {
       device[typeField] = text;
+      logDiagnostic('Basic', 'labels.lookup_derive', {
+        className: classInfo.name,
+        modelField,
+        typeField,
+        modelAttribute: modelAttr,
+        sourceLookupType,
+        parentLookupType: cleanValue(rule.parentLookupType || (value && (value.parent_type || value.parentType || value._parent_type || value._parentType))),
+        valueFound: true,
+        parentFound: true
+      }, context);
       return device;
     }
   }
+  logDiagnostic('Basic', 'labels.lookup_derive', {
+    className: classInfo.name,
+    modelField,
+    typeField,
+    modelAttribute: modelAttr,
+    sourceLookupType,
+    valueFound: values.length > 0,
+    parentFound: false,
+    reason: values.length ? 'missing_parent_lookup' : 'missing_lookup_value'
+  }, context);
 
   return device;
 }
@@ -1993,13 +2138,21 @@ async function handleResolve(req, res) {
   const body = await readJsonBody(req);
   const devices = validateResolveDevices(body);
   const labelConfig = mergeLabelConfig(loadAliasConfig());
-  const result = await resolveDrafts(devices, authToken, labelConfig);
+  const requestId = cleanValue(req.cmdb2labelRequestId || res.getHeader('x-request-id'));
+  const diagnosticMode = sanitizeDiagnosticModeHeader(req.headers['x-cmdb2label-diagnostic']);
+  const diagnosticContext = sanitizeDiagnosticContext(body.diagnosticContext || {});
+  const result = await resolveDrafts(devices, authToken, labelConfig, {
+    requestId,
+    diagnosticMode,
+    diagnosticContext
+  });
   logDiagnostic('Basic', 'labels.resolve', {
     inputCount: result.meta.inputCount,
     outputCount: result.meta.outputCount,
     errorCount: result.errors.length,
+    errorFields: uniqueStrings(result.errors.map((error) => cleanValue(error.field))).slice(0, 16),
     cmdbuildRestCalls: result.meta.cmdbuildRestCalls
-  });
+  }, { requestId, diagnosticMode });
   sendJson(res, result.ok ? 200 : 422, result);
 }
 
@@ -2068,6 +2221,39 @@ function sanitizeEmail(value) {
 
 function sanitizeDiagnosticParam(value, maxLength) {
   return cleanValue(value).replace(/[\r\n<>]/g, '').slice(0, maxLength);
+}
+
+function sanitizeDiagnosticKey(value, maxLength = 80) {
+  return sanitizeDiagnosticParam(value, maxLength).replace(/[^\p{L}\p{N}\s._:/@-]/gu, '');
+}
+
+function sanitizeDiagnosticModeHeader(value) {
+  const mode = normalizeDiagnosticMode(value);
+  return mode === 'Basic' || mode === 'Verbose' ? mode : '';
+}
+
+function boundedDiagnosticNumber(value, max) {
+  const number = Number(value);
+  if (!Number.isFinite(number) || number < 0) return 0;
+  return Math.min(Math.floor(number), max);
+}
+
+function sanitizeDiagnosticContext(value = {}) {
+  if (!value || typeof value !== 'object') return {};
+  const headerMapping = value.headerMapping && typeof value.headerMapping === 'object' ? value.headerMapping : {};
+  const missingFields = Array.isArray(value.missingFields) ? value.missingFields : [];
+  return {
+    source: sanitizeDiagnosticParam(value.source, 80),
+    delimiter: sanitizeDiagnosticParam(value.delimiter, 40),
+    singleColumnMode: sanitizeDiagnosticParam(value.singleColumnMode, 40),
+    rowCount: boundedDiagnosticNumber(value.rowCount, 100000),
+    validDeviceCount: boundedDiagnosticNumber(value.validDeviceCount, 100000),
+    missingFields: uniqueStrings(missingFields.map((item) => sanitizeDiagnosticKey(item, 40))).slice(0, 16),
+    headerMapping: Object.fromEntries(Object.entries(headerMapping)
+      .map(([field, header]) => [sanitizeDiagnosticKey(field, 40), sanitizeDiagnosticKey(header, 80)])
+      .filter(([field, header]) => field && header)
+      .slice(0, 16))
+  };
 }
 
 function injectFooterConfig(html, config = {}) {
@@ -2213,6 +2399,7 @@ function routeName(pathname) {
 function attachRequestLogging(req, res, requestUrl) {
   const startedAt = Date.now();
   const requestId = cleanValue(req.headers['x-request-id']) || crypto.randomUUID();
+  req.cmdb2labelRequestId = requestId;
   res.setHeader('x-request-id', requestId);
   logDiagnostic('Verbose', 'http.request.start', {
     requestId,
@@ -2360,6 +2547,8 @@ export {
   isSafeRelativeRequestTarget,
   isSameOriginRequest,
   loggingStatus,
+  capDiagnosticMode,
+  effectiveDiagnosticMode,
   normalizeClassRootPath,
   normalizeDiagnosticMode,
   normalizeLogTargets,

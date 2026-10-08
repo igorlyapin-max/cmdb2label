@@ -119,6 +119,8 @@
         .status-pill.ok { border-color: #86efac; background: #f0fdf4; color: #166534; }
         .status-pill.warn { border-color: #fde68a; background: #fffbeb; color: #92400e; }
         .status-pill.error { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
+        .diagnostic-control { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 3px 8px; border: 1px solid #cbd5e1; border-radius: 999px; background: #f8fafc; }
+        .diagnostic-control select { width: auto; min-width: 86px; padding: 2px 20px 2px 6px; border-radius: 999px; font-size: 12px; }
         .app-version {
             position: fixed;
             right: 12px;
@@ -252,7 +254,15 @@
     </div>
     <div class="status-bar">
         <span id="sessionStatus" class="status-pill warn">CMDBuild: проверка сессии...</span>
-        <span id="resolveStatus" class="status-pill">Обогащение: ожидание данных</span>
+        <span id="resolveStatus" class="status-pill" role="status" aria-live="polite">Обогащение: ожидание данных</span>
+        <label class="diagnostic-control" for="diagnosticSelect">
+            <span>Диагностика</span>
+            <select id="diagnosticSelect" title="Расширенное логирование только для текущей вкладки; доступный уровень ограничивается настройкой backend">
+                <option value="">off</option>
+                <option value="Basic">Basic</option>
+                <option value="Verbose">Verbose</option>
+            </select>
+        </label>
     </div>
     <div class="csv-controls">
         <div>
@@ -457,10 +467,23 @@ function initialize() {
     csvInput.addEventListener('input', scheduleCsvAutoImport);
     csvInput.addEventListener('paste', scheduleCsvAutoImport);
     document.getElementById('csvFile').addEventListener('change', handleCsvFileChange);
+    initializeDiagnosticsControl();
     checkBackendSession();
     updateDevicePreviewState();
     updateLabelPreviewState();
     updateActionState();
+}
+
+function initializeDiagnosticsControl() {
+    const select = document.getElementById('diagnosticSelect');
+    if (!select) return;
+    select.value = getDebugLevel();
+    select.addEventListener('change', () => {
+        const value = select.value === 'Basic' || select.value === 'Verbose' ? select.value : '';
+        if (value) sessionStorage.setItem('cmdb2labelDebug', value);
+        else sessionStorage.removeItem('cmdb2labelDebug');
+        diag('Basic', 'diagnostic_mode_changed', { mode: value || 'off' });
+    });
 }
 
 function bumpDeviceStateRevision() {
@@ -610,7 +633,8 @@ async function importCsvText(rawText, sourceName) {
         replace: true,
         sourceName,
         baseErrors: errors,
-        revision: operationRevision
+        revision: operationRevision,
+        diagnosticContext: buildImportDiagnosticContext(sourceName, delimiterInfo, headerResult, rows, importedDevices, errors)
     });
     diag('Basic', 'csv_import', {
         source: sourceName,
@@ -619,6 +643,38 @@ async function importCsvText(rawText, sourceName) {
         validRows: importedDevices.length,
         errorRows: errors.length
     });
+}
+
+function buildImportDiagnosticContext(sourceName, delimiterInfo, headerResult, rows, devices, errors) {
+    return {
+        source: sourceName,
+        delimiter: delimiterInfo && delimiterInfo.label ? delimiterInfo.label : '',
+        singleColumnMode: headerResult && headerResult.mapping ? headerResult.mapping.__singleColumnMode || '' : '',
+        rowCount: Array.isArray(rows) ? Math.max(rows.length - 1, 0) : 0,
+        validDeviceCount: Array.isArray(devices) ? devices.length : 0,
+        missingFields: summarizeMissingFields(errors),
+        headerMapping: summarizeHeaderMapping(headerResult && headerResult.mapping)
+    };
+}
+
+function summarizeHeaderMapping(mapping) {
+    const result = {};
+    if (!mapping || !mapping.__headers) return result;
+    REQUIRED_FIELDS.concat(OPTIONAL_FIELDS).forEach(field => {
+        if (mapping[field] !== undefined && mapping.__headers[mapping[field]] !== undefined) {
+            result[field] = String(mapping.__headers[mapping[field]] || '').trim();
+        }
+    });
+    return result;
+}
+
+function summarizeMissingFields(errors) {
+    const fields = [];
+    (errors || []).forEach(error => {
+        const field = String(error && error.field || '').trim();
+        if (field && !fields.includes(field)) fields.push(field);
+    });
+    return fields;
 }
 
 function isSingleColumnCsv(rows) {
@@ -950,6 +1006,7 @@ async function applyResolvedDevices(drafts, options) {
     const sourceName = options && options.sourceName ? options.sourceName : 'Ввод';
     const baseErrors = options && Array.isArray(options.baseErrors) ? options.baseErrors : [];
     const operationRevision = options && Number.isInteger(options.revision) ? options.revision : bumpDeviceStateRevision();
+    const diagnosticContext = options && options.diagnosticContext ? options.diagnosticContext : {};
     let devices = drafts.map(normalizeDevice);
     let errors = baseErrors.slice();
 
@@ -958,11 +1015,11 @@ async function applyResolvedDevices(drafts, options) {
     if (devices.length && !errors.length && devices.some(deviceNeedsResolve)) {
         setResolving(true, 'Обогащение: запрос к CMDBuild', 'warn');
         try {
-            const resolved = await resolveDevicesThroughBackend(devices, sourceName);
+            const resolved = await resolveDevicesThroughBackend(devices, sourceName, diagnosticContext);
             if (!isCurrentDeviceStateRevision(operationRevision)) return;
             devices = resolved.devices.map(normalizeDevice);
             errors = errors.concat(resolved.errors || []);
-            setResolving(false, `Обогащение: ${devices.length} строк`, errors.length ? 'warn' : 'ok');
+            setResolving(false, buildResolveStatusText(`Обогащение: ${devices.length} строк`, resolved.requestId), errors.length ? 'warn' : 'ok');
         } catch (error) {
             if (!isCurrentDeviceStateRevision(operationRevision)) return;
             errors.push({
@@ -971,7 +1028,7 @@ async function applyResolvedDevices(drafts, options) {
                 message: `Не удалось дозапросить данные: ${error.message}`
             });
             errors.push(...localRequiredErrors(devices));
-            setResolving(false, 'Обогащение: недоступно', 'error');
+            setResolving(false, buildResolveStatusText('Обогащение: недоступно', error.requestId), 'error');
         }
     } else {
         errors.push(...localRequiredErrors(devices));
@@ -997,26 +1054,43 @@ function normalizeDevice(device) {
     return result;
 }
 
-async function resolveDevicesThroughBackend(devices, sourceName) {
+async function resolveDevicesThroughBackend(devices, sourceName, diagnosticContext) {
     const token = await getCsrfToken();
+    const diagnosticMode = getDebugLevel();
+    const headers = {
+        'Content-Type': 'application/json',
+        'X-CMDB2Label-CSRF': token
+    };
+    if (diagnosticMode) headers['X-CMDB2Label-Diagnostic'] = diagnosticMode;
     const response = await fetch(`${API_BASE}/resolve`, {
         method: 'POST',
         credentials: 'same-origin',
-        headers: {
-            'Content-Type': 'application/json',
-            'X-CMDB2Label-CSRF': token
-        },
+        headers,
         body: JSON.stringify({
             source: sourceName,
-            devices
+            devices,
+            diagnosticContext: diagnosticMode ? diagnosticContext || {} : undefined
         })
     });
+    const requestId = response.headers.get('x-request-id') || '';
     const payload = await response.json().catch(() => null);
-    if (!payload) throw new Error(`HTTP ${response.status}`);
-    if (!response.ok && response.status !== 422) {
-        throw new Error(payload.message || `HTTP ${response.status}`);
+    if (!payload) {
+        const error = new Error(`HTTP ${response.status}`);
+        error.requestId = requestId;
+        throw error;
     }
+    if (!response.ok && response.status !== 422) {
+        const error = new Error(payload.message || `HTTP ${response.status}`);
+        error.requestId = requestId;
+        throw error;
+    }
+    payload.requestId = requestId;
+    if (diagnosticMode) diag('Basic', 'resolve_request_id', { requestId, source: sourceName });
     return payload;
+}
+
+function buildResolveStatusText(text, requestId) {
+    return requestId ? `${text}; requestId ${requestId}` : text;
 }
 
 async function getCsrfToken() {
@@ -1469,7 +1543,7 @@ function diag(level, eventName, details) {
 }
 
 function getDebugLevel() {
-    const value = localStorage.getItem('cmdb2labelDebug');
+    const value = sessionStorage.getItem('cmdb2labelDebug');
     return value === 'Basic' || value === 'Verbose' ? value : '';
 }
 

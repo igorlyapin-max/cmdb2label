@@ -67,6 +67,7 @@ server {
 
 ```dotenv
 CMDB_LABELS_DIAGNOSTIC_MODE=Basic
+CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL=off
 CMDB_LABELS_LOG_TARGET=stdout
 CMDB_LABELS_LOG_EXTERNAL_SINK=platform
 ```
@@ -76,6 +77,17 @@ CMDB_LABELS_LOG_EXTERNAL_SINK=platform
 ```dotenv
 CMDB_LABELS_DIAGNOSTIC_MODE=Verbose
 ```
+
+Для диагностики только текущей вкладки пользователя не включайте
+`CMDB_LABELS_DIAGNOSTIC_MODE` на весь backend. Задайте операторский cap:
+
+```dotenv
+CMDB_LABELS_DIAGNOSTIC_MODE=off
+CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL=Basic
+```
+
+После этого UI может отправлять `X-CMDB2Label-Diagnostic`, но backend не примет
+уровень выше `CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL`.
 
 Если площадка собирает только stdout/stderr через Docker logging driver, collector, sidecar, ELK/OpenSearch или аналог, оставляйте `CMDB_LABELS_LOG_TARGET=stdout` и задавайте `CMDB_LABELS_LOG_EXTERNAL_SINK=platform|collector|sidecar|docker-driver`. Если нужен прямой app-level syslog, используйте отдельный режим:
 

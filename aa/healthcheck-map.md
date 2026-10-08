@@ -8,7 +8,7 @@
 | HC-004 | `H0` | `GET /cmdbuild/custom-api/labels/health/ready` | Same-origin proxy/monitoring | `200` ready, `503` not ready | Runtime config и доступность CMDBuild upstream | Как readiness | API-prefixed alias для proxy integration |
 | HC-005 | `H0` | Docker `HEALTHCHECK` | Docker engine | Exit `0` или `1` | `GET /health/live` на container port `8094` | Только exit code | Использует `127.0.0.1:8094` внутри container |
 | HC-006 | `H0` | `GET /about` и `GET /cmdbuild/custom-api/labels/about` | Operator, support UI | `200` | Только build identity file/env | version, buildVersion, revision, sourceState, runtimeArtifact SHA256 | Без CMDBuild origin, cookies или secrets |
-| HC-007 | `OAPI0` | `GET /cmdbuild/custom-api/labels/logging/status` | Authenticated browser/operator | `200`, `401` | Валидная CMDBuild session cookie | log level, format, targets, diagnostic mode, redaction headers | Diagnostic endpoint, не readiness |
+| HC-007 | `OAPI0` | `GET /cmdbuild/custom-api/labels/logging/status` | Authenticated browser/operator | `200`, `401` | Валидная CMDBuild session cookie | log level, format, targets, diagnostic mode, session diagnostic cap, redaction headers | Diagnostic endpoint, не readiness |
 
 ## Классы отказа readiness
 

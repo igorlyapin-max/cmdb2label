@@ -8,10 +8,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   buildIdentityPayload,
+  capDiagnosticMode,
   createServer,
+  effectiveDiagnosticMode,
   injectAppVersion,
   injectFooterConfig,
   injectLabelConfig,
+  loggingStatus,
   sanitizeDiagnosticParam,
   normalizeClassRootPath,
   normalizeLogTargets,
@@ -103,6 +106,49 @@ test('runtime config accepts production stdout logging with platform sink', () =
 
   assert.equal(result.ok, true);
   assert.deepEqual(result.errors, []);
+});
+
+test('session diagnostic mode is capped by operator config', () => {
+  assert.equal(capDiagnosticMode('Verbose', 'off'), 'off');
+  assert.equal(capDiagnosticMode('Verbose', 'Basic'), 'Basic');
+  assert.equal(capDiagnosticMode('Verbose', 'Verbose'), 'Verbose');
+  assert.equal(effectiveDiagnosticMode({
+    serverDiagnosticMode: 'off',
+    diagnosticMode: 'Verbose',
+    sessionDiagnosticMaxLevel: 'Basic'
+  }), 'Basic');
+  assert.equal(effectiveDiagnosticMode({
+    serverDiagnosticMode: 'Basic',
+    diagnosticMode: 'Verbose',
+    sessionDiagnosticMaxLevel: 'off'
+  }), 'Basic');
+});
+
+test('logging status exposes session diagnostic cap', () => {
+  const status = loggingStatus();
+
+  assert.equal(status.diagnostic.sessionMaxLevel, 'off');
+  assert.equal(status.diagnostic.sessionEnabled, false);
+});
+
+test('runtime config rejects invalid diagnostic variants', () => {
+  const result = validateRuntimeConfig({
+    nodeEnv: 'production',
+    csrfSecret: 'stable-test-value',
+    logTargets: ['stdout'],
+    externalLogSink: 'platform',
+    env: {
+      NODE_ENV: 'production',
+      CMDB_LABELS_CSRF_SECRET: 'stable-test-value',
+      CMDB_LABELS_LOG_EXTERNAL_SINK: 'platform',
+      CMDB_LABELS_DIAGNOSTIC_MODE: 'debug',
+      CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL: 'trace'
+    }
+  });
+
+  assert.equal(result.ok, false);
+  assert.equal(result.errors.some((error) => error.code === 'invalid_diagnostic_mode'), true);
+  assert.equal(result.errors.some((error) => error.code === 'invalid_session_diagnostic_max_level'), true);
 });
 
 test('runtime config accepts production stdout logging with docker driver sink', () => {

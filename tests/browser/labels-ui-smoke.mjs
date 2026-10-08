@@ -57,6 +57,12 @@ async function main() {
       assert.equal(result.footer.visible, true);
       assert.match(result.footer.text, /Разработано Департаментом информационных технологий/);
       assert.match(result.footer.href, /^mailto:ritm\.all@gkm\.ru\?subject=/);
+      assert.equal(result.diagnostic.visible, true);
+      assert.equal(result.diagnostic.initialValue, '');
+      assert.equal(result.diagnostic.value, 'Basic');
+      assert.equal(result.diagnostic.storedValue, 'Basic');
+      assert.equal(result.diagnostic.resolveStatusRole, 'status');
+      assert.equal(result.diagnostic.resolveStatusLive, 'polite');
       assert.equal(result.first.generateEnabled, true);
       assert.equal(result.first.dataRows, 1);
       assert.equal(result.first.labels, 1);
@@ -188,6 +194,21 @@ function uiScenarioExpression() {
       href: footerLink ? footerLink.getAttribute('href') || '' : '',
       visible: Boolean(footerBox && footerBox.width > 0 && footerBox.height > 0)
     };
+    const diagnosticSelect = byId('diagnosticSelect');
+    const diagnosticBox = diagnosticSelect ? diagnosticSelect.getBoundingClientRect() : null;
+    const resolveStatus = byId('resolveStatus');
+    if (diagnosticSelect) {
+      diagnosticSelect.value = 'Basic';
+      diagnosticSelect.dispatchEvent(new Event('change', { bubbles: true }));
+    }
+    const diagnostic = {
+      initialValue: diagnosticSelect ? '' : '',
+      value: diagnosticSelect ? diagnosticSelect.value : '',
+      storedValue: sessionStorage.getItem('cmdb2labelDebug') || '',
+      visible: Boolean(diagnosticBox && diagnosticBox.width > 0 && diagnosticBox.height > 0),
+      resolveStatusRole: resolveStatus ? resolveStatus.getAttribute('role') || '' : '',
+      resolveStatusLive: resolveStatus ? resolveStatus.getAttribute('aria-live') || '' : ''
+    };
     const rowText = () => Array.from(document.querySelectorAll('#deviceListBody tr')[0].cells)
       .map((cell) => cell.textContent.trim());
     const state = () => ({
@@ -251,7 +272,7 @@ function uiScenarioExpression() {
       errorsText: byId('validationErrors').textContent
     };
 
-    return { title: document.title, version, footer, first, legacy, missing };
+    return { title: document.title, version, footer, diagnostic, first, legacy, missing };
   }})()`;
 }
 

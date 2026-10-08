@@ -7,7 +7,7 @@
 | `app.started` | info | `L0` | Успешный startup | listen address, prefixes, runtimeConfig summary, logging status | Без cookies/tokens/raw payloads |
 | `app.config_invalid` | error | `L0` | Ошибка валидации startup config | nodeEnv, diagnosticMode, logTargets, externalSink, error codes, safe errorDetails | Error details не должны включать raw filesystem exception paths |
 | `http.request.finish` | info/warn/error | `IF1`, `OAPI0`, `H0`, `M0` | HTTP response завершен | requestId, method, path, route, statusCode, durationMs, hasCmdbuildCookie boolean | Без headers, query values, cookie values, payloads |
-| `diagnostic.http.request.finish` | info | `L0` | `CMDB_LABELS_DIAGNOSTIC_MODE=Basic|Verbose` | Тот же safe request summary | Diagnostic mode временный; raw payloads не логируются |
+| `diagnostic.http.request.finish` | info | `L0` | `CMDB_LABELS_DIAGNOSTIC_MODE=Basic|Verbose` или session cap `CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL` | Тот же safe request summary | Diagnostic mode временный; raw payloads не логируются |
 | `labels.resolve` | info diagnostic | `OAPI0`, `OAPI1` | `/resolve` завершен в diagnostic mode | inputCount, outputCount, errorCount, cmdbuildRestCalls | Без inventory, serial, model, type values |
 | `client.event` | info diagnostic | `OAPI0`, `L0` | Browser вызывает `/client-log` | sanitized stage/message с ограниченной длиной | Требует CMDBuild session; без free-form secrets |
 | `cmdbuild.proxy_target_rejected` | warn | Отключенный generic proxy | Небезопасный proxy request target | method, path | Generic proxy по умолчанию отключен |

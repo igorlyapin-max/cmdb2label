@@ -91,6 +91,7 @@ paths:
         X-CMDB2Label-CSRF. Backend обогащает недостающие поля через CMDBuild REST.
       parameters:
         - $ref: "#/components/parameters/CsrfHeader"
+        - $ref: "#/components/parameters/DiagnosticHeader"
       requestBody:
         required: true
         content:
@@ -346,6 +347,14 @@ components:
         type: string
         maxLength: 64
         pattern: '^[0-9a-f]{64}$'
+    DiagnosticHeader:
+      name: X-CMDB2Label-Diagnostic
+      in: header
+      required: false
+      description: Временный request-scoped diagnostic mode для текущей UI-сессии; backend применяет его только в пределах CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL и не включает raw payload logging.
+      schema:
+        type: string
+        enum: [Basic, Verbose]
   responses:
     BadRequest:
       description: Невалидное тело запроса
@@ -436,6 +445,46 @@ components:
           maxItems: 100
           items:
             $ref: "#/components/schemas/DeviceDraft"
+        diagnosticContext:
+          $ref: "#/components/schemas/ResolveDiagnosticContext"
+    ResolveDiagnosticContext:
+      type: object
+      description: Безопасный контекст UI для request-scoped diagnostics; значения карточек, SN и инвентарные номера не передаются.
+      additionalProperties: false
+      properties:
+        source:
+          type: string
+          maxLength: 80
+          pattern: '^[^\r\n<>]{0,80}$'
+        delimiter:
+          type: string
+          maxLength: 40
+          pattern: '^[^\r\n<>]{0,40}$'
+        singleColumnMode:
+          type: string
+          maxLength: 40
+          pattern: '^[^\r\n<>]{0,40}$'
+        rowCount:
+          type: integer
+          minimum: 0
+          maximum: 100000
+        validDeviceCount:
+          type: integer
+          minimum: 0
+          maximum: 100000
+        missingFields:
+          type: array
+          maxItems: 16
+          items:
+            type: string
+            maxLength: 40
+            pattern: '^[^\r\n<>]{0,40}$'
+        headerMapping:
+          type: object
+          additionalProperties:
+            type: string
+            maxLength: 80
+            pattern: '^[^\r\n<>]{0,80}$'
     DeviceDraft:
       type: object
       properties:
@@ -586,4 +635,49 @@ components:
           type: boolean
         logging:
           type: object
+          required: [level, format, targets, diagnostic, redactHeaders, externalSink]
           additionalProperties: true
+          properties:
+            level:
+              type: string
+              maxLength: 16
+              pattern: '^[a-z]+$'
+            format:
+              type: string
+              enum: [json, text]
+            targets:
+              type: array
+              items:
+                type: string
+                enum: [stdout, syslog]
+            diagnostic:
+              type: object
+              required: [mode, enabled, levels, sessionMaxLevel, sessionEnabled]
+              additionalProperties: false
+              properties:
+                mode:
+                  type: string
+                  enum: [off, Basic, Verbose]
+                  description: Server-wide diagnostic mode from CMDB_LABELS_DIAGNOSTIC_MODE.
+                enabled:
+                  type: boolean
+                levels:
+                  type: array
+                  items:
+                    type: string
+                    enum: [Basic, Verbose]
+                sessionMaxLevel:
+                  type: string
+                  enum: [off, Basic, Verbose]
+                  description: Operator cap for X-CMDB2Label-Diagnostic from CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL.
+                sessionEnabled:
+                  type: boolean
+            redactHeaders:
+              type: array
+              items:
+                type: string
+                maxLength: 64
+                pattern: '^[a-z0-9-]+$'
+            externalSink:
+              type: string
+              enum: [none, platform, collector, sidecar, docker-driver]

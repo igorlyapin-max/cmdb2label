@@ -60,6 +60,15 @@ GET  /metrics
 }
 ```
 
+Для временной диагностики конкретной вкладки UI может отправить header
+`X-CMDB2Label-Diagnostic: Basic|Verbose` и безопасный `diagnosticContext`.
+Backend применяет этот header только в пределах operator cap
+`CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL`; по умолчанию cap равен `off`.
+Этот режим действует только на текущий `/resolve` request после same-origin,
+session cookie и CSRF checks. В diagnostic context попадают только source,
+delimiter, counts и header mapping; значения SN, инвентарных номеров, модели,
+типа, cookie, CSRF и raw CMDBuild payloads не передаются и не логируются.
+
 Ответ:
 
 ```json
@@ -111,6 +120,7 @@ CMDB_LABELS_PORT=8094
 CMDBUILD_ORIGIN=http://127.0.0.1:8090
 CMDB_LABELS_CSRF_SECRET=<required-in-production>
 CMDB_LABELS_DIAGNOSTIC_MODE=off|Basic|Verbose
+CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL=off|Basic|Verbose
 CMDB_LABELS_LOG_TARGET=stdout|stdout,syslog
 CMDB_LABELS_LOG_EXTERNAL_SINK=platform|collector|sidecar|docker-driver
 CMDB_LABELS_SYSLOG_HOST=127.0.0.1
@@ -179,4 +189,4 @@ Backend выбирает CMDBuild attributes по alias priority, а не по �
 
 Lookup derivation читает parent lookup модели. Если CMDBuild metadata атрибута модели отдает `lookupType`, `sourceLookupType` можно не задавать. Если parent id приходит как scalar `parent`, задайте `parentLookupType`, чтобы backend резолвил тип по lookup values.
 
-`Verbose` diagnostics включается только временно. Cookie, auth headers, CSRF token, raw CMDBuild payloads и строки результата не пишутся в логи. Пошаговое включение расширенного логирования BFF и проверка `/cmdbuild/custom-api/labels/logging/status` описаны в `docs/runbook.ru.md`.
+`Verbose` diagnostics включается только временно. Session-scoped диагностика из UI ограничивается backend-owned `CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL`, поэтому пользовательский header не может поднять уровень выше операторской настройки. Cookie, auth headers, CSRF token, raw CMDBuild payloads и строки результата не пишутся в логи. Пошаговое включение расширенного логирования BFF и проверка `/cmdbuild/custom-api/labels/logging/status` описаны в `docs/runbook.ru.md`.

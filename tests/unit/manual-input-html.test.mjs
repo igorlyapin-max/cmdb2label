@@ -8,12 +8,13 @@ const html = fs.readFileSync(new URL('../../cmdb2label.html', import.meta.url), 
 function extractFunction(source, name) {
   const start = source.indexOf(`function ${name}`);
   assert.notEqual(start, -1, `Function ${name} must exist`);
+  const asyncPrefixStart = source.slice(Math.max(0, start - 6), start) === 'async ' ? start - 6 : start;
   const bodyStart = source.indexOf('{', start);
   let depth = 0;
   for (let index = bodyStart; index < source.length; index += 1) {
     if (source[index] === '{') depth += 1;
     else if (source[index] === '}') depth -= 1;
-    if (depth === 0) return source.slice(start, index + 1);
+    if (depth === 0) return source.slice(asyncPrefixStart, index + 1);
   }
   throw new Error(`Function ${name} body is not closed`);
 }
@@ -72,6 +73,83 @@ function createHtmlHelpers(labelConfig = null) {
 
 const helpers = createHtmlHelpers();
 const parseManualDevice = helpers.parseManualDevice;
+
+function createDiagnosticUiSandbox() {
+  const constantsStart = html.indexOf("const API_BASE =");
+  const constantsEnd = html.indexOf('const QR_VERSION_SPECS', constantsStart);
+  assert.ok(constantsStart >= 0 && constantsEnd > constantsStart, 'API constants must exist');
+  const script = [
+    constantsStart >= 0 ? html.slice(constantsStart, constantsEnd) : '',
+    extractFunction(html, 'getDebugLevel'),
+    extractFunction(html, 'resolveDevicesThroughBackend'),
+    extractFunction(html, 'buildResolveStatusText')
+  ].join('\n');
+  const calls = [];
+  const storage = new Map();
+  const sandbox = {
+    calls,
+    sessionStorage: {
+      getItem: (key) => storage.has(key) ? storage.get(key) : null,
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key)
+    },
+    getCsrfToken: async () => 'csrf-token',
+    diag: () => {},
+    fetch: async (url, options) => {
+      calls.push({ url, options });
+      return {
+        ok: true,
+        status: 200,
+        headers: {
+          get: (name) => String(name).toLowerCase() === 'x-request-id' ? 'request-ui-1' : ''
+        },
+        json: async () => ({ ok: true, devices: [], errors: [], meta: { inputCount: 0, outputCount: 0, cmdbuildRestCalls: 0 } })
+      };
+    }
+  };
+  vm.runInNewContext(`${script}\nglobalThis.resolveDevicesThroughBackend = resolveDevicesThroughBackend;\nglobalThis.getDebugLevel = getDebugLevel;\nglobalThis.buildResolveStatusText = buildResolveStatusText;`, sandbox, { filename: 'cmdb2label-diagnostic-ui.vm.js' });
+  return sandbox;
+}
+
+test('diagnostic resolve mode is session-scoped and sends request header', async () => {
+  const sandbox = createDiagnosticUiSandbox();
+  sandbox.sessionStorage.setItem('cmdb2labelDebug', 'Verbose');
+  const payload = await sandbox.resolveDevicesThroughBackend([{ sn: 'SN-SECRET' }], 'Вставка CSV', {
+    source: 'Вставка CSV',
+    headerMapping: { sn: 'Серийный номер' }
+  });
+
+  assert.equal(sandbox.getDebugLevel(), 'Verbose');
+  assert.equal(payload.requestId, 'request-ui-1');
+  assert.equal(sandbox.calls[0].options.headers['X-CMDB2Label-Diagnostic'], 'Verbose');
+  const body = JSON.parse(sandbox.calls[0].options.body);
+  assert.deepEqual(body.diagnosticContext.headerMapping, { sn: 'Серийный номер' });
+  assert.equal(sandbox.buildResolveStatusText('Обогащение: 1 строк', payload.requestId), 'Обогащение: 1 строк; requestId request-ui-1');
+});
+
+test('diagnostic resolve error preserves backend request id', async () => {
+  const sandbox = createDiagnosticUiSandbox();
+  sandbox.fetch = async (url, options) => {
+    sandbox.calls.push({ url, options });
+    return {
+      ok: false,
+      status: 503,
+      headers: {
+        get: (name) => String(name).toLowerCase() === 'x-request-id' ? 'request-ui-503' : ''
+      },
+      json: async () => ({ ok: false, message: 'CMDBuild upstream unavailable.' })
+    };
+  };
+
+  await assert.rejects(
+    sandbox.resolveDevicesThroughBackend([{ sn: 'SN-SECRET' }], 'Вставка CSV', {}),
+    (error) => {
+      assert.equal(error.message, 'CMDBuild upstream unavailable.');
+      assert.equal(error.requestId, 'request-ui-503');
+      return true;
+    }
+  );
+});
 
 test('manual input prefers explicit inventory number over Code in CMDBuild dumps', () => {
   const parsed = parseManualDevice(`Code

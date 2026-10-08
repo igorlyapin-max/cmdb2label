@@ -27,6 +27,13 @@ CMDB_LABELS_DIAGNOSTIC_MODE=Basic npm start
 CMDB_LABELS_DIAGNOSTIC_MODE=Verbose npm start
 ```
 
+`CMDB_LABELS_DIAGNOSTIC_MODE` включает режим на весь backend. Для диагностики
+только текущей UI-сессии используйте отдельный operator cap:
+
+```bash
+CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL=Basic npm start
+```
+
 Режимы:
 
 | Значение | Назначение | Production usage |
@@ -34,6 +41,11 @@ CMDB_LABELS_DIAGNOSTIC_MODE=Verbose npm start
 | `off` | Diagnostic events выключены | Значение по умолчанию |
 | `Basic` | Расширенные безопасные события BFF: catalog/resolve summaries, request finish diagnostics, sanitized client events | Допустим для диагностики при сохранении штатного structured logging |
 | `Verbose` | Дополнительно пишет sanitized request start/upstream details | Только временно; после диагностики вернуть `off` или `Basic` |
+
+`CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL=off|Basic|Verbose` ограничивает
+значение `X-CMDB2Label-Diagnostic`, которое может включить пользователь в UI.
+По умолчанию `off`: browser header игнорируется. При `Basic` запрос `Verbose`
+понижается до `Basic`; при `Verbose` доступны оба уровня.
 
 Безопасность diagnostic logs:
 
@@ -49,7 +61,34 @@ curl -i \
   http://127.0.0.1:8094/cmdbuild/custom-api/labels/logging/status
 ```
 
-Endpoint требует живую CMDBuild session cookie и возвращает безопасное состояние логирования: `level`, `format`, `targets`, `diagnostic.mode`, `diagnostic.enabled`, `diagnostic.levels`, redaction headers и, если включен syslog, его sanitized параметры.
+Endpoint требует живую CMDBuild session cookie и возвращает безопасное состояние логирования: `level`, `format`, `targets`, `diagnostic.mode`, `diagnostic.enabled`, `diagnostic.levels`, `diagnostic.sessionMaxLevel`, redaction headers и, если включен syslog, его sanitized параметры.
+
+### Диагностика только текущей UI-сессии
+
+Если ошибка обогащения воспроизводится у конкретного пользователя, не обязательно
+перезапускать BFF с `CMDB_LABELS_DIAGNOSTIC_MODE`, если заранее разрешен
+`CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL=Basic` или временно `Verbose`.
+В UI рядом со статусом обогащения есть переключатель `Диагностика`:
+
+1. Выберите `Basic` или временно `Verbose`.
+2. Повторите вставку CSV/copy-paste или загрузку файла.
+3. Скопируйте `requestId`, который появится в статусе `Обогащение`.
+4. Ищите в backend logs события с этим `requestId`: `diagnostic.labels.resolve_requested`,
+   `diagnostic.catalog.*`, `diagnostic.labels.search_key`,
+   `diagnostic.labels.search_result`, `diagnostic.labels.lookup_derive`,
+   `diagnostic.labels.resolve`.
+5. После диагностики верните переключатель в `off` или закройте вкладку.
+
+Этот режим хранится в `sessionStorage` браузера и действует только для текущей
+вкладки. Backend принимает его только на same-origin `/resolve` request с живой
+CMDBuild session cookie и валидным `X-CMDB2Label-CSRF`; итоговый уровень всегда
+ограничивается `CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL`.
+
+Даже в `Verbose` не логируются raw значения CSV/copy-paste, инвентарные номера,
+серийные номера, модель, тип, cookies, auth headers, CSRF token и raw CMDBuild
+card payloads. В логи попадают только counts, mapped headers, logical fields,
+имена классов, имена CMDBuild attributes, status/result counts и причины, почему
+lookup-derived `Тип` не был получен.
 
 ## Logging
 
@@ -76,7 +115,8 @@ CMDB_LABELS_SYSLOG_FACILITY=local0
 
 Если используется `CMDB_LABELS_LOG_TARGET=stdout,syslog`, backend валидирует `CMDB_LABELS_SYSLOG_HOST`, `CMDB_LABELS_SYSLOG_PORT`, `CMDB_LABELS_SYSLOG_PROTOCOL` и `CMDB_LABELS_SYSLOG_FACILITY` на старте и в readiness. В этом режиме `CMDB_LABELS_LOG_EXTERNAL_SINK` не требуется, потому что syslog является вторым operational sink.
 
-Статус логирования также используется для проверки `CMDB_LABELS_DIAGNOSTIC_MODE`:
+Статус логирования также используется для проверки `CMDB_LABELS_DIAGNOSTIC_MODE`
+и `CMDB_LABELS_SESSION_DIAGNOSTIC_MAX_LEVEL`:
 
 ```bash
 curl -i \

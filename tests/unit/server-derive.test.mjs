@@ -280,6 +280,35 @@ test('resolveDrafts enriches ambiguous single-column inventory lookup key', asyn
   assert.equal(result.devices[0].type, 'Printer');
 });
 
+test('resolveDrafts emits request-scoped diagnostic logs without raw lookup values', async () => {
+  const events = [];
+  const result = await resolveDrafts([{ lookupKey: 'CNDDJSTGFT' }], 'auth-diagnostic-redacted', mergeLabelConfig(), {
+    classRootPath: '',
+    cmdbuildRequest: fakeCmdbuildRequest,
+    requestId: 'req-diagnostic-1',
+    diagnosticMode: 'Verbose',
+    sessionDiagnosticMaxLevel: 'Verbose',
+    diagnosticContext: {
+      source: 'Вставка CSV',
+      delimiter: 'single-column',
+      singleColumnMode: 'sn',
+      rowCount: 1,
+      validDeviceCount: 1,
+      headerMapping: { sn: 'Серийный номер' }
+    },
+    diagnosticLogger: (event) => events.push(event),
+    diagnosticLoggerOnly: true
+  });
+
+  assert.equal(result.ok, true);
+  assert.ok(events.some((event) => event.event === 'diagnostic.labels.resolve_requested'));
+  assert.ok(events.some((event) => event.event === 'diagnostic.labels.search_key'));
+  assert.ok(events.some((event) => event.event === 'diagnostic.labels.lookup_derive'));
+  const serialized = JSON.stringify(events);
+  assert.match(serialized, /req-diagnostic-1/);
+  assert.doesNotMatch(serialized, /CNDDJSTGFT|7700010000160724|HPE Aruba IAP-207/);
+});
+
 test('filterClassesByRoot keeps root and descendant classes only', () => {
   const classes = [
     { name: 'ZabbixMonitoring', description: 'Root' },
